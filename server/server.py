@@ -116,10 +116,10 @@ class Server:
                             with self.clients_lock:
                                 if is_master_connecting:
                                     client.type = ClientType.Master
-                                    print(f"Typing {client.identifier} as master")
                                 else:
                                     client.type = ClientType.Slave
-                                    print(f"Typing {client.identifier} as slave")
+
+                            self._register_and_dedup(client)
 
                         else:
                             if is_master:
@@ -168,3 +168,42 @@ class Server:
             pass
 
         self.data_mgr.update_data()
+
+    def _kick(self, client: ClientObject, reason: str = "replaced"):
+        try:
+            client.send(f"kick;{reason}")
+        except Exception:
+            pass
+        sid = client.session_id
+        client.close()
+        with self.clients_lock:
+            if self.clients.get(sid) is client:
+                self.clients.pop(sid, None)
+            key = str(client.identifier)
+            if not client.identifier.is_empty and self.clients_identifier_mapped.get(key) is client:
+                self.clients_identifier_mapped.pop(key, None)
+        print(f"[kick] session={sid} reason={reason}")
+
+    def _register_and_dedup(self, client: ClientObject):
+        victims = []
+
+        with self.clients_lock:
+            if client.is_master:
+                for other in self.clients.values():
+                    if other is not client and other.is_master:
+                        victims.append(other)
+            elif client.is_slave:
+                key = str(client.identifier) if not client.identifier.is_empty else None
+                for other in self.clients.values():
+                    if other is client or not other.is_slave:
+                        continue
+                    same_id = key and not other.identifier.is_empty and str(other.identifier) == key
+                    same_ip = other.address.ip == client.address.ip
+                    if same_id or (client.identifier.is_empty and other.identifier.is_empty and same_ip):
+                        victims.append(other)
+
+                if key:
+                    self.clients_identifier_mapped[key] = client
+
+        for other in victims:
+            self._kick(other, reason="duplicate")
