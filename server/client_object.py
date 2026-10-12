@@ -21,6 +21,18 @@ class ClientObject:
     def session_id(self):
         return fash_hash(str(self.address))
 
+    @property
+    def is_master(self):
+        return self.type == ClientType.Master
+
+    @property
+    def is_slave(self):
+        return self.type == ClientType.Slave
+
+    @property
+    def is_untyped(self):
+        return self.type == ClientType.UnTyped
+
     def close(self):
         try:
             self.connection.shutdown(socket.SHUT_RDWR)

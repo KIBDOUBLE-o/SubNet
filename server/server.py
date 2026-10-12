@@ -1,3 +1,4 @@
+import json
 import socket
 import threading
 
@@ -66,6 +67,23 @@ class Server:
             print(f"[+] Connection {str(client.address)} -> session={sid}")
             threading.Thread(target=self.handle_client, args=(client,), daemon=True).start()
 
+    def _cmd_get_slaves(self) -> list:
+        slaves = []
+        with self.clients_lock:
+            for client in self.clients.values():
+                if client.is_slave:
+                    slaves.append({
+                        "type": "slave",
+                        "id": str(client.identifier),
+                        "displayName": str(client.identifier),
+                        "ip": client.address.ip,
+                        "ping": -1,
+                        "online": True,
+                    })
+            print({client.type: str(client.identifier) for client in self.clients.values()})
+
+        return slaves
+
     def handle_client(self, client: ClientObject):
         sid = client.session_id
         try:
@@ -85,20 +103,31 @@ class Server:
 
                 root = cmd[0]
                 cmd = cmd[1:]
-                is_master = client.type == ClientType.Master
+                is_master = client.is_master
 
                 try:
                     if len(cmd) >= 1:
-                        if client.type == ClientType.UnTyped:
+                        if client.is_untyped:
                             is_master_connecting = False
                             if root == "auth":
                                 password = cmd[0]
-                                is_master_connecting = self.auth_attempt(password)
+                                is_master_connecting = self.auth_attempt(password) and password != "wrong"
 
-                            if is_master_connecting:
-                                client.type = ClientType.Master
-                            else:
-                                client.type = ClientType.Slave
+                            with self.clients_lock:
+                                if is_master_connecting:
+                                    client.type = ClientType.Master
+                                    print(f"Typing {client.identifier} as master")
+                                else:
+                                    client.type = ClientType.Slave
+                                    print(f"Typing {client.identifier} as slave")
+
+                        else:
+                            if is_master:
+                                if root == "request":
+                                    subject = cmd[0]
+                                    print(f"Request: {subject}")
+                                    if subject == "slaves":
+                                        client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
 
                 except Exception as e:
                     print(f"[!] Command error from session={sid}: {e}")
