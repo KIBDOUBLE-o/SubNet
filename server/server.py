@@ -125,9 +125,20 @@ class Server:
                             if is_master:
                                 if root == "request":
                                     subject = cmd[0]
-                                    print(f"Request: {subject}")
                                     if subject == "slaves":
                                         client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
+                                    elif subject == "slave":
+                                        target = cmd[1]
+                                        request = cmd[2]
+                                        args = cmd[3]
+                                        self.send_by_identifier(Identifier(target), f"request {request} {args} {client.identifier}")
+
+                                if root == "send":
+                                    subject = cmd[0]
+                                    target = cmd[1]
+                                    payload = cmd[2]
+                                    self.send_by_identifier(Identifier(target), f"send {subject} {payload}")
+
 
                 except Exception as e:
                     print(f"[!] Command error from session={sid}: {e}")

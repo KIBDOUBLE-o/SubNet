@@ -15,6 +15,9 @@ class MasterUI:
         self.window: Window | None = None
         self.maximized = False
 
+        self.translation_fps = 15
+        self.translation_quality = "MID"
+
     def call(self, func: str, *args):
         js_args = ", ".join(json.dumps(arg) for arg in args)
         self.window.evaluate_js(f"{func}({js_args});")
@@ -27,6 +30,9 @@ class MasterUI:
 
     def set_slaves(self, slaves: list):
         self.call("setSlavesTree", slaves)
+
+    def set_screen(self, image: str):
+        self.call("setScreen", image)
 
     def on_error(self, error: str):
         self.send_announce(error, "error")
@@ -77,6 +83,7 @@ class MasterUI:
                 # загрузить info/screen/bash для этого slave
                 # self.call("setInfo", {...})
                 # self.call("setScreen", data_url)
+
                 pass
 
             def on_slave_close(api, slave_id: str):
@@ -98,10 +105,13 @@ class MasterUI:
                 pass
 
             def on_screen_fps(api, fps: int):
-                pass
+                self.translation_fps = fps
 
             def on_screen_quality(api, quality: str):
-                pass
+                self.translation_quality = quality
+
+            def request_screen(api, selected: str):
+                self.master.send(f"request slave slave_screen {self.translation_quality} {selected}")
 
         constructor = WebConstructorDummy()
         if os.path.exists("ui"):

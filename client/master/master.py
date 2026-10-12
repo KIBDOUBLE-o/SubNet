@@ -50,12 +50,21 @@ class Master(Client):
 
     def on_message(self, message: str) -> Optional[Payload]:
         if message.startswith("slaves"):
-            try:
-                tree = json.loads(message[6:].lstrip())
-            except json.JSONDecodeError as e:
-                self.error_callback(f"Bad slaves payload: {e}")
-                return None
+            tree = json.loads(message[6:].lstrip())
             self._set_slaves(tree)
+
+        else:
+            cmd = message.split()
+            if not cmd: return None
+            root = cmd[0]
+            cmd = cmd[1:]
+
+            if root == "send":
+                subject = cmd[0]
+                payload = message[(len(subject)+1):]
+                if subject == "slave_screen":
+                    self.ui.set_screen(payload)
+
         return None
 
     def _set_slaves(self, tree: Any) -> None:
