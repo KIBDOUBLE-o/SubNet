@@ -17,6 +17,7 @@ class ScreenStream:
         self.quality = "mid"  # low / mid / high
 
         self.selected_slave: str | None = None
+        self.selected_slave_info: dict = {}
         self._stop_event: threading.Event | None = None
         self._lock = threading.Lock()
 

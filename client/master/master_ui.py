@@ -18,6 +18,8 @@ class MasterUI:
         self.fullscreen_window: Window | None = None
         self.maximized = False
 
+        self.current_path = ""
+
         self.screen = ScreenStream(
             send=self._send,
             on_error=self.on_error,
@@ -78,6 +80,21 @@ class MasterUI:
                 self.call("setScreen", None)
             else:
                 self.call("setScreen", image)
+
+
+    def set_local(self, local: list):
+        self.call("setLocal", local)
+
+    def set_relative(self, path: str):
+        self.call("setExplorerPath", path)
+        self.current_path = path
+
+    def request_local(self):
+        self._send(f"request slave {self.screen.selected_slave} local {self.current_path}")
+
+    def open_file(self, path: str, content: str, is_image: bool):
+        self.call("setExplorerFile", path, content, is_image)
+
 
     def fullscreen_set_frame_rate(self, frames):
         if self.is_fullscreen_open():
@@ -168,6 +185,8 @@ class MasterUI:
 
             def on_slave_open(api, slave_id: str):
                 ui.screen.start(slave_id)
+                ui._send(f"request slave {ui.screen.selected_slave} common_info")
+                # ui._send(f"request slave {ui.screen.selected_slave} local {ui.explorer.current_path}")
 
             def on_slave_close(api, slave_id: str):
                 if ui.screen.selected_slave == slave_id:
@@ -208,6 +227,31 @@ class MasterUI:
             def request_screen(api, selected: str):
                 ui.screen.request_once(selected)
                 ui.screen.start(selected)
+
+            def on_open_file(api, path: str):
+                path = path.replace("/", "\\")
+                ui._send(f"request slave {ui.screen.selected_slave} file {path}")
+
+            def on_open_folder(api, path: str):
+                new = path.replace("/", "\\")
+                if new == "\\":
+                    if ui.current_path.endswith(":\\"):
+                        new = "!"
+                    elif ui.current_path == "!":
+                        return
+                    else:
+                        new = "\\".join(ui.current_path.split("\\")[:-1])
+                        if new.endswith(":"):
+                            new += "\\"
+                else:
+                    if ui.current_path == "!":
+                        new = new[2:]
+                print(new)
+                ui.set_relative(new)
+                self.request_local()
+
+            def on_item_remove(api, path: str, is_folder: bool):
+                pass
 
         # main UI
         constructor = WebConstructorDummy()

@@ -1,8 +1,12 @@
 import io
+import os
+import string
 from hashlib import sha256
 import base64
 import subprocess
 
+
+LETTERS = string.ascii_uppercase
 
 def fast_hash(content: str) -> str:
     return sha256(content.encode("utf-8")).hexdigest()
@@ -15,6 +19,28 @@ def execute_bash(bash: str):
         check=True
     )
     return result.stderr + result.stdout
+
+def build_local_tree(path: str) -> list:
+    if path.endswith("\\") and len(path) > 3:
+        path = path[:-1]
+    folder = []
+    if path != "!":
+        for item in os.listdir(path):
+            full = f"{path}\\{item}"
+            folder.append({
+                "folder": os.path.isdir(full),
+                "name": item
+            })
+    else:
+        for letter in LETTERS:
+            drive = f"{letter}:\\"
+            if os.path.exists(drive):
+                folder.append({
+                    "folder": True,
+                    "name": drive
+                })
+
+    return folder
 
 def encode_base64(data: str) -> str:
     return base64.b64encode(data.encode(errors="replace")).decode("ascii")

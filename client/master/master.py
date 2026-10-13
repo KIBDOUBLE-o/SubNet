@@ -64,10 +64,22 @@ class Master(Client):
         if root == "send" and len(tokens) >= 3:
             subject = tokens[1]
             payload = tokens[2]
-            if subject == "slave_screen" and self.ui:
-                self.ui.set_screen(payload)
-            elif subject == "bash_execution" and self.ui:
-                self.ui.append_bash(decode_base64(payload))
+            if self.ui:
+                if subject == "slave_screen":
+                    self.ui.set_screen(payload)
+                elif subject == "bash_execution":
+                    self.ui.append_bash(decode_base64(payload))
+                elif subject == "common_info":
+                    self.ui.screen.selected_slave_info = json.loads(decode_base64(payload))
+                    self.ui.set_relative(self.ui.screen.selected_slave_info["path"])
+                    self.ui.request_local()
+
+                elif subject == "local":
+                    self.ui.set_local(json.loads(decode_base64(payload)))
+                elif subject == "file":
+                    path, content = decode_base64(payload).split("\1")
+                    content = decode_base64(content)
+                    self.ui.open_file(path, content, path.split(".")[-1] in ["png", "jpg", "jpeg", "svg", "PNG", "JPG", "JPEG", "SVG"])
 
         return None
 
