@@ -5,7 +5,7 @@ from socket import socket as con
 from objects.address import Address
 from objects.identifier import Identifier
 from server.client_type import ClientType
-from utils import fash_hash
+from utils import fast_hash
 
 
 class ClientObject:
@@ -19,7 +19,7 @@ class ClientObject:
 
     @property
     def session_id(self):
-        return fash_hash(str(self.address))
+        return fast_hash(str(self.address))
 
     @property
     def is_master(self) -> bool:

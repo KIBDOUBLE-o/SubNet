@@ -5,6 +5,7 @@ import time
 from typing import TYPE_CHECKING, Any, Optional
 
 from client.client import Client, Payload
+from utils import decode_base64
 
 if TYPE_CHECKING:
     from master_ui import MasterUI
@@ -65,6 +66,8 @@ class Master(Client):
             payload = tokens[2]
             if subject == "slave_screen" and self.ui:
                 self.ui.set_screen(payload)
+            elif subject == "bash_execution" and self.ui:
+                self.ui.append_bash(decode_base64(payload))
 
         return None
 

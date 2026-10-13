@@ -1,0 +1,36 @@
+<!-- fullscreen stage -->
+  <div class="stage" id="stage">
+    <!-- placeholder (visible only when no image set) -->
+    <div class="stage-placeholder" id="stagePlaceholder">
+      <div class="icon">⛶</div>
+      <div>NO SIGNAL</div>
+      <div class="hint">setScreen(base64) to display</div>
+    </div>
+
+    <!-- main image -->
+    <img class="stage-img" id="stageImage" alt="screen" hidden>
+
+    <!-- top interactive hint bar -->
+    <div class="interactive-bar" id="interactiveBar">
+      <span id="interactiveBarText">alt to enter interactive mode</span>
+    </div>
+
+    <!-- bottom interactive mode bar (visible only in interactive mode) -->
+    <div class="interactive-mode-bar" id="interactiveModeBar">
+      <span class="indicator"></span>
+      <span>Interactive Mode</span>
+    </div>
+
+    <!-- top UI overlay (exit button + fps) -->
+    <div class="ui-top">
+      <button class="btn-exit" id="btnExit" title="Exit">
+        <span>✕</span>
+      </button>
+
+      <div class="fps-counter" id="fpsCounter">
+        <span class="dot"></span>
+        <span class="fps-value" id="fpsValue">0</span>
+        <span class="fps-unit">FPS</span>
+      </div>
+    </div>
+  </div>
