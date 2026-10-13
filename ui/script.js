@@ -7,7 +7,7 @@
  *   sendAnnounce(message, type)   // type: info|error|warn|success
  *   setSlavesTree(tree)
  *   setInfo(data)
- *   setScreen(src)
+ *   setScreen(base64 [, mime])  // raw base64 or data-URL
  *   appendBash(text, type)
  *   clearBash()
  *   setLoginError(msg)            // optional, on splash
@@ -146,11 +146,30 @@
   // CSS -webkit-app-region works on Chromium; if not, mousedown → start_drag()
   function bindDrag(el) {
     if (!el) return;
+    let startX, startY;
+
     el.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
-      // don't start drag from interactive children
       if (e.target.closest('button, input, select, a, .no-drag')) return;
-      callPython('start_drag');
+
+      startX = e.screenX;
+      startY = e.screenY;
+
+      const onMove = (ev) => {
+        const dx = ev.screenX - startX;
+        const dy = ev.screenY - startY;
+        startX = ev.screenX;
+        startY = ev.screenY;
+        callPython('window_move', dx, dy);
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
     });
   }
   bindDrag($('#titlebar-drag'));
@@ -417,13 +436,26 @@
   }
 
   // ─── SCREEN ────────────────────────────────────────────────
-  function setScreen(src) {
-    if (!src) {
+  /**
+   * setScreen(base64 [, mime])
+   *   base64 — сырой base64 или data-URL (data:image/...;base64,...)
+   *   mime   — default image/jpeg (не нужен, если уже data-URL)
+   * setScreen(null) — очистить
+   */
+  function setScreen(base64, mime) {
+    if (!base64) {
       screenImg.hidden = true;
       screenImg.removeAttribute('src');
       screenPlaceholder.hidden = false;
       return;
     }
+
+    let src = base64;
+    if (typeof base64 === 'string' && !base64.startsWith('data:')) {
+      const clean = base64.replace(/\s+/g, '');
+      src = `data:${mime || 'image/jpeg'};base64,${clean}`;
+    }
+
     screenImg.src = src;
     screenImg.hidden = false;
     screenPlaceholder.hidden = true;

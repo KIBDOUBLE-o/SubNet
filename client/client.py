@@ -6,14 +6,16 @@ import threading
 import time
 from typing import Callable, Optional, Union
 
+from objects.identifier import Identifier
 from settings import address
 
 Payload = Union[bytes, str]
 
 
 class Client:
-    def __init__(self, password: str = "wrong", auto_reconnect: bool = True):
+    def __init__(self, password: str = "wrong", auto_reconnect: bool = True, identifier_t = "s"):
         self.password = password
+        self.identifier = Identifier(t=identifier_t)
         self.auto_reconnect = auto_reconnect
         self.conn: Optional[socket.socket] = None
         self.received_buffer: list[bytes] = []
@@ -135,7 +137,8 @@ class Client:
             return False
 
     def _auth(self) -> Optional[str]:
-        if not self.send(f"auth {self.password}"):
+        print(f"Sending auth request with identifier: {self.identifier}")
+        if not self.send(f"auth {self.password} {self.identifier}"):
             return None
         deadline = time.time() + 5.0
         while time.time() < deadline and self.running:

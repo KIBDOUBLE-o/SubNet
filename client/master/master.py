@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 class Master(Client):
     def __init__(self, password: str = "", ui: Optional["MasterUI"] = None):
-        super().__init__(password=password, auto_reconnect=False)
+        super().__init__(password=password, auto_reconnect=False, identifier_t="m")
         self.ui = ui
 
     def start(self, password: Optional[str] = None) -> bool:
@@ -45,32 +45,30 @@ class Master(Client):
         self.error_callback("Invalid password")
 
     def on_disconnected(self) -> None:
-        if self.ui and hasattr(self.ui, "send_announce"):
+        if self.ui:
             self.ui.send_announce("Disconnected from server", "warn")
 
     def on_message(self, message: str) -> Optional[Payload]:
         if message.startswith("slaves"):
             tree = json.loads(message[6:].lstrip())
             self._set_slaves(tree)
+            return None
 
-        else:
-            cmd = message.split()
-            if not cmd: return None
-            root = cmd[0]
-            cmd = cmd[1:]
+        tokens = message.split(maxsplit=2)
+        if not tokens:
+            return None
 
-            if root == "send":
-                subject = cmd[0]
-                payload = message[(len(subject)+1):]
-                if subject == "slave_screen":
-                    self.ui.set_screen(payload)
+        root = tokens[0]
+
+        if root == "send" and len(tokens) >= 3:
+            subject = tokens[1]
+            payload = tokens[2]
+            if subject == "slave_screen" and self.ui:
+                self.ui.set_screen(payload)
 
         return None
 
     def _set_slaves(self, tree: Any) -> None:
         if not self.ui:
             return
-        if hasattr(self.ui, "set_slaves"):
-            self.ui.set_slaves(tree)
-        elif hasattr(self.ui, "call"):
-            self.ui.call("setSlavesTree", tree)
+        self.ui.set_slaves(tree)
