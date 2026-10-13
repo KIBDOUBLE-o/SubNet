@@ -9,6 +9,7 @@ from client.master.master import Master
 from client.master.remote_input import RemoteInput
 from client.master.screen_stream import ScreenStream
 from client.master.web_constructor_dummy import WebConstructorDummy
+from utils import encode_base64
 
 
 class MasterUI:
@@ -29,6 +30,10 @@ class MasterUI:
             send=self._send,
             get_slave_id=lambda: self.screen.selected_slave,
         )
+
+    @property
+    def active_slave(self) -> str:
+        return self.screen.selected_slave
 
     def _send(self, message: str):
         if self.master:
@@ -185,11 +190,11 @@ class MasterUI:
 
             def on_slave_open(api, slave_id: str):
                 ui.screen.start(slave_id)
-                ui._send(f"request slave {ui.screen.selected_slave} common_info")
-                # ui._send(f"request slave {ui.screen.selected_slave} local {ui.explorer.current_path}")
+                ui._send(f"request slave {ui.active_slave} common_info")
+                # ui._send(f"request slave {ui.active_slave} local {ui.explorer.current_path}")
 
             def on_slave_close(api, slave_id: str):
-                if ui.screen.selected_slave == slave_id:
+                if ui.active_slave == slave_id:
                     ui.screen.stop()
                 ui.set_screen(None)
 
@@ -200,7 +205,7 @@ class MasterUI:
                 pass
 
             def on_bash_command(api, cmd: str):
-                ui._send(f"request slave {ui.screen.selected_slave} bash_execution {cmd}")
+                ui._send(f"request slave {ui.active_slave} bash_execution {cmd}")
 
             def on_screen_drop(api, data_url, filename):
                 pass
@@ -230,7 +235,7 @@ class MasterUI:
 
             def on_open_file(api, path: str):
                 path = path.replace("/", "\\")
-                ui._send(f"request slave {ui.screen.selected_slave} file {path}")
+                ui._send(f"request slave {ui.active_slave} file {path}")
 
             def on_open_folder(api, path: str):
                 new = path.replace("/", "\\")
@@ -246,12 +251,25 @@ class MasterUI:
                 else:
                     if ui.current_path == "!":
                         new = new[2:]
-                print(new)
                 ui.set_relative(new)
-                self.request_local()
+                ui.request_local()
+
+            def on_rename(api, path: str, new_path: str):
+                path = path.replace("/", "\\")
+                new_path = new_path.replace("/", "\\")
+                ui._send(f"request slave {ui.active_slave} rename {path} {encode_base64(new_path)}")
+
+            def on_save_file(api, path: str, content: str):
+                path = path.replace("/", "\\")
+                ui._send(f"request slave {ui.active_slave} save {path} {encode_base64(content)}")
+
+            def on_create_item(api, path: str, is_folder: bool):
+                path = path.replace("/", "\\")
+                ui._send(f"request slave {ui.active_slave} create {path} {is_folder}")
 
             def on_item_remove(api, path: str, is_folder: bool):
-                pass
+                path = path.replace("/", "\\")
+                ui._send(f"request slave {ui.active_slave} remove {path} {is_folder}")
 
         # main UI
         constructor = WebConstructorDummy()

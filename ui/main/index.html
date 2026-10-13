@@ -1,270 +1,258 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SubNet DungeonMaster</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <!-- ========== SPLASH / LOGIN ========== -->
-  <div id="splash" class="splash">
-    <div class="splash-top">
-      <div class="splash-drag drag-region" id="splash-drag" title="Drag window"></div>
-      <div class="splash-win-controls">
-        <button id="btn-splash-minimize" class="win-btn" title="Свернуть" aria-label="Minimize">
-          <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
-        </button>
-        <button id="btn-splash-close" class="win-btn win-close" title="Закрыть" aria-label="Close">
-          <svg width="12" height="12" viewBox="0 0 12 12">
-            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
-        </button>
-      </div>
+<!-- ========== SPLASH / LOGIN ========== -->
+<div id="splash" class="splash">
+<div class="splash-top">
+    <div class="splash-drag drag-region" id="splash-drag" title="Drag window"></div>
+    <div class="splash-win-controls">
+    <button id="btn-splash-minimize" class="win-btn" title="Свернуть" aria-label="Minimize">
+        <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
+    </button>
+    <button id="btn-splash-close" class="win-btn win-close" title="Закрыть" aria-label="Close">
+        <svg width="12" height="12" viewBox="0 0 12 12">
+        <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+    </button>
     </div>
-    <div class="splash-content">
-      <div class="splash-logo">
-        <div class="logo-mark">♂</div>
-        <h1 class="splash-title">SubNet<br><span>DungeonMaster</span></h1>
-        <p class="splash-tagline">ass we can · 300 bucks</p>
-      </div>
-      <div class="splash-form">
-        <label class="field-label" for="password">DUNGEON KEY</label>
-        <input type="password" id="password" class="input-field" placeholder="••••••••" autocomplete="off" />
-        <button id="btn-login" class="btn-primary" type="button">ENTER THE DUNGEON</button>
-        <p id="login-error" class="login-error" hidden></p>
-      </div>
-      <div class="splash-footer">thank you sir · v0.1</div>
+</div>
+<div class="splash-content">
+    <div class="splash-logo">
+    <div class="logo-mark">♂</div>
+    <h1 class="splash-title">SubNet<br><span>DungeonMaster</span></h1>
+    <p class="splash-tagline">ass we can · 300 bucks</p>
     </div>
-  </div>
+    <div class="splash-form">
+    <label class="field-label" for="password">DUNGEON KEY</label>
+    <input type="password" id="password" class="input-field" placeholder="••••••••" autocomplete="off" />
+    <button id="btn-login" class="btn-primary" type="button">ENTER THE DUNGEON</button>
+    <p id="login-error" class="login-error" hidden></p>
+    </div>
+    <div class="splash-footer">thank you sir · v0.1</div>
+</div>
+</div>
 
-  <!-- ========== MAIN APP ========== -->
-  <div id="app" class="app" hidden>
-    <header class="titlebar" id="titlebar">
-      <div class="titlebar-left">
-        <button id="btn-slaves" class="btn-slaves" title="Slaves — open the dungeon roster" aria-label="Open slaves drawer">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-          <span class="btn-slaves-label">SLAVES</span>
-        </button>
+<!-- ========== MAIN APP ========== -->
+<div id="app" class="app" hidden>
+<header class="titlebar" id="titlebar">
+    <div class="titlebar-left">
+    <button id="btn-slaves" class="btn-slaves" title="Slaves — open the dungeon roster" aria-label="Open slaves drawer">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span class="btn-slaves-label">SLAVES</span>
+    </button>
 
-        <div class="titlebar-drag drag-region" id="titlebar-drag">
-          <span class="app-name">SubNet DungeonMaster</span>
-          <div id="active-slave-bar" class="active-slave-bar no-drag" hidden>
-            <span class="active-slave-dot" id="active-slave-dot"></span>
-            <span class="active-slave-name" id="active-slave-name">—</span>
-            <button id="btn-close-slave" class="icon-btn-sm" title="Release slave" aria-label="Close slave">
-              <svg width="12" height="12" viewBox="0 0 12 12">
-                <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <nav class="tabs" id="tabs">
-        <button class="tab active" data-page="info">INFO</button>
-        <button class="tab" data-page="screen">SCREEN</button>
-        <button class="tab" data-page="bash">BASH</button>
-        <button class="tab" data-page="state">STATE</button>
-        <button class="tab" data-page="explorer">EXPLORER</button>
-        <button class="tab" data-page="keylog">KEYLOG</button>
-      </nav>
-
-      <div class="titlebar-right">
-        <button id="btn-minimize" class="win-btn" title="Свернуть" aria-label="Minimize">
-          <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
-        </button>
-        <button id="btn-maximize" class="win-btn" title="Развернуть" aria-label="Maximize">
-          <svg id="icon-maximize" width="12" height="12" viewBox="0 0 12 12">
-            <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
-          <svg id="icon-restore" width="12" height="12" viewBox="0 0 12 12" hidden>
-            <rect x="3" y="1" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.3"/>
-            <rect x="1" y="3" width="8" height="8" fill="var(--bg-2)" stroke="currentColor" stroke-width="1.3"/>
-          </svg>
-        </button>
-        <button id="btn-close" class="win-btn win-close" title="Закрыть" aria-label="Close">
-          <svg width="12" height="12" viewBox="0 0 12 12">
+    <div class="titlebar-drag drag-region" id="titlebar-drag">
+        <span class="app-name">SubNet DungeonMaster</span>
+        <div id="active-slave-bar" class="active-slave-bar no-drag" hidden>
+        <span class="active-slave-dot" id="active-slave-dot"></span>
+        <span class="active-slave-name" id="active-slave-name">—</span>
+        <button id="btn-close-slave" class="icon-btn-sm" title="Release slave" aria-label="Close slave">
+            <svg width="12" height="12" viewBox="0 0 12 12">
             <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
+            </svg>
         </button>
-      </div>
-    </header>
+        </div>
+    </div>
+    </div>
 
-    <main class="content">
-      <!-- INFO -->
-      <section id="page-info" class="page active">
-        <div class="page-header">
-          <h2>SYSTEM INFO</h2>
-          <span class="page-meta" id="info-meta">—</span>
-        </div>
-        <div id="info-grid" class="info-grid"></div>
-        <div id="info-no-slave" class="no-slave-hint">
-          <p>Choose your fighter</p>
-          <p class="hint">Open SLAVES and pick a slave, master</p>
-        </div>
-      </section>
+    <nav class="tabs" id="tabs">
+    <button class="tab active" data-page="info">INFO</button>
+    <button class="tab" data-page="screen">SCREEN</button>
+    <button class="tab" data-page="bash">BASH</button>
+    <button class="tab" data-page="state">STATE</button>
+    <button class="tab" data-page="explorer">EXPLORER</button>
+    <button class="tab" data-page="keylog">KEYLOG</button>
+    </nav>
 
-      <!-- SCREEN -->
-      <section id="page-screen" class="page">
-        <div class="screen-wrap">
-          <div id="screen-dropzone" class="screen-dropzone">
-            <img id="screen-img" class="screen-img" alt="Remote screen" hidden />
-            <div id="screen-placeholder" class="screen-placeholder">
-              <div class="placeholder-icon">▣</div>
-              <p>No signal</p>
-              <p class="hint">Dungeon cam offline · select a slave</p>
-            </div>
-          </div>
-          <div class="screen-toolbar">
-            <button id="btn-screen-expand" class="tool-btn" title="Развернуть">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-              </svg>
-              <span>EXPAND</span>
-            </button>
-            <div class="tool-group">
-              <label class="tool-label">FPS</label>
-              <select id="screen-fps" class="tool-select">
-                <option value="5">5</option>
-                <option value="10" selected>10</option>
-                <option value="15">15</option>
-                <option value="30">30</option>
-                <option value="60">60</option>
-              </select>
-            </div>
-            <div class="tool-group">
-              <label class="tool-label">QUALITY</label>
-              <select id="screen-quality" class="tool-select">
-                <option value="low">LOW</option>
-                <option value="medium" selected>MED</option>
-                <option value="high">HIGH</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </section>
+    <div class="titlebar-right">
+    <button id="btn-minimize" class="win-btn" title="Свернуть" aria-label="Minimize">
+        <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
+    </button>
+    <button id="btn-maximize" class="win-btn" title="Развернуть" aria-label="Maximize">
+        <svg id="icon-maximize" width="12" height="12" viewBox="0 0 12 12">
+        <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+        <svg id="icon-restore" width="12" height="12" viewBox="0 0 12 12" hidden>
+        <rect x="3" y="1" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        <rect x="1" y="3" width="8" height="8" fill="var(--bg-2)" stroke="currentColor" stroke-width="1.3"/>
+        </svg>
+    </button>
+    <button id="btn-close" class="win-btn win-close" title="Закрыть" aria-label="Close">
+        <svg width="12" height="12" viewBox="0 0 12 12">
+        <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+    </button>
+    </div>
+</header>
 
-      <!-- BASH -->
-      <section id="page-bash" class="page">
-        <div class="bash-wrap">
-          <div id="bash-output" class="bash-output"></div>
-          <div class="bash-input-row">
-            <span class="bash-prompt">›</span>
-            <input type="text" id="bash-input" class="bash-input" placeholder="command…" autocomplete="off" spellcheck="false" />
-          </div>
-        </div>
-      </section>
+<main class="content">
+    <!-- INFO -->
+    <section id="page-info" class="page active">
+    <div class="page-header">
+        <h2>SYSTEM INFO</h2>
+        <span class="page-meta" id="info-meta">—</span>
+    </div>
+    <div id="info-grid" class="info-grid"></div>
+    <div id="info-no-slave" class="no-slave-hint">
+        <p>Choose your fighter</p>
+        <p class="hint">Open SLAVES and pick a slave, master</p>
+    </div>
+    </section>
 
-      <!-- SLAVE STATE -->
-      <section id="page-state" class="page">
-        <div class="page-header">
-          <h2>SLAVE STATE</h2>
-          <span class="page-meta" id="state-meta">—</span>
+    <!-- SCREEN -->
+    <section id="page-screen" class="page">
+    <div class="screen-wrap">
+        <div id="screen-dropzone" class="screen-dropzone">
+        <img id="screen-img" class="screen-img" alt="Remote screen" hidden />
+        <div id="screen-placeholder" class="screen-placeholder">
+            <div class="placeholder-icon">▣</div>
+            <p>No signal</p>
+            <p class="hint">Dungeon cam offline · select a slave</p>
         </div>
-        <div id="state-list" class="state-list"></div>
-        <div id="state-empty" class="no-slave-hint visible">
-          <p>No state modules</p>
-          <p class="hint">setSlaveState([...]) from Python</p>
         </div>
-      </section>
-
-      <!-- EXPLORER -->
-      <section id="page-explorer" class="page">
-        <div class="explorer-layout">
-          <div class="explorer-sidebar">
-            <div class="explorer-toolbar">
-              <button id="btn-explorer-up" class="tool-btn" title="Parent">↑</button>
-              <button id="btn-explorer-new-file" class="tool-btn" title="New file">+ FILE</button>
-              <button id="btn-explorer-new-folder" class="tool-btn" title="New folder">+ DIR</button>
-              <button id="btn-explorer-refresh" class="tool-btn" title="Refresh">↻</button>
-            </div>
-            <div class="explorer-path" id="explorer-path">/</div>
-            <div id="explorer-tree" class="explorer-tree"></div>
-          </div>
-          <div class="explorer-viewer">
-            <div class="explorer-viewer-header">
-              <span id="explorer-file-name">—</span>
-              <button id="btn-explorer-save" class="tool-btn" hidden>SAVE</button>
-              <button id="btn-explorer-close-viewer" class="tool-btn" hidden>×</button>
-            </div>
-            <div id="explorer-image-wrap" class="explorer-image-wrap" hidden>
-              <img id="explorer-image" class="explorer-image" alt="preview" />
-            </div>
-            <div id="explorer-editor-wrap" class="explorer-editor-wrap" hidden>
-              <textarea id="explorer-editor"></textarea>
-            </div>
-            <div id="explorer-viewer-empty" class="explorer-viewer-empty">
-              <p>Select a file</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- KEY LOG -->
-      <section id="page-keylog" class="page">
-        <div class="page-header">
-          <h2>KEY LOG</h2>
-          <span class="page-meta" id="keylog-meta">—</span>
-        </div>
-        <div class="keylog-controls">
-          <div class="tool-group">
-            <label class="tool-label">FROM</label>
-            <input type="datetime-local" id="keylog-from" class="tool-input" />
-          </div>
-          <div class="tool-group">
-            <label class="tool-label">TO</label>
-            <input type="datetime-local" id="keylog-to" class="tool-input" />
-          </div>
-          <button id="btn-keylog-apply" class="tool-btn">APPLY</button>
-          <button id="btn-keylog-save" class="tool-btn" disabled>SAVE SELECTED</button>
-        </div>
-        <div id="keylog-list" class="keylog-list"></div>
-        <div id="keylog-empty" class="no-slave-hint visible">
-          <p>No key events</p>
-          <p class="hint">setKeyLog([...]) from Python</p>
-        </div>
-      </section>
-    </main>
-
-    <!-- SLAVES DRAWER -->
-    <aside id="drawer" class="drawer">
-      <div class="drawer-header">
-        <h3>SLAVES</h3>
-        <span class="drawer-sub">of the dungeon</span>
-        <button id="btn-slaves-refresh" class="icon-btn" title="Refresh slaves" aria-label="Refresh">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-            <path d="M23 4v6h-6"/>
-            <path d="M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
+        <div class="screen-toolbar">
+        <button id="btn-screen-expand" class="tool-btn" title="Развернуть">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            <span>EXPAND</span>
         </button>
-        <button id="btn-drawer-close" class="icon-btn" title="Закрыть" aria-label="Close drawer">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div id="slaves-tree" class="slaves-tree"></div>
-    </aside>
-    <div id="drawer-overlay" class="drawer-overlay"></div>
-  </div>
+        <div class="tool-group">
+            <label class="tool-label">FPS</label>
+            <select id="screen-fps" class="tool-select">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="15">15</option>
+            <option value="30">30</option>
+            <option value="60">60</option>
+            </select>
+        </div>
+        <div class="tool-group">
+            <label class="tool-label">QUALITY</label>
+            <select id="screen-quality" class="tool-select">
+            <option value="low">LOW</option>
+            <option value="medium" selected>MED</option>
+            <option value="high">HIGH</option>
+            </select>
+        </div>
+        </div>
+    </div>
+    </section>
 
-  <div id="announce-container" class="announce-container"></div>
+    <!-- BASH -->
+    <section id="page-bash" class="page">
+    <div class="bash-wrap">
+        <div id="bash-output" class="bash-output"></div>
+        <div class="bash-input-row">
+        <span class="bash-prompt">›</span>
+        <input type="text" id="bash-input" class="bash-input" placeholder="command…" autocomplete="off" spellcheck="false" />
+        </div>
+    </div>
+    </section>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
-  <script src="script.js"></script>
-</body>
-</html>
+    <!-- SLAVE STATE -->
+    <section id="page-state" class="page">
+    <div class="page-header">
+        <h2>SLAVE STATE</h2>
+        <span class="page-meta" id="state-meta">—</span>
+    </div>
+    <div id="state-list" class="state-list"></div>
+    <div id="state-empty" class="no-slave-hint visible">
+        <p>No state modules</p>
+        <p class="hint">setSlaveState([...]) from Python</p>
+    </div>
+    </section>
+
+    <!-- EXPLORER -->
+    <section id="page-explorer" class="page">
+    <div class="explorer-layout">
+        <div class="explorer-sidebar">
+        <div class="explorer-toolbar">
+            <button id="btn-explorer-up" class="tool-btn" title="Parent">↑</button>
+            <button id="btn-explorer-new-file" class="tool-btn" title="New file">+ FILE</button>
+            <button id="btn-explorer-new-folder" class="tool-btn" title="New folder">+ DIR</button>
+            <button id="btn-explorer-refresh" class="tool-btn" title="Refresh">↻</button>
+        </div>
+        <div class="explorer-path" id="explorer-path">/</div>
+        <div id="explorer-tree" class="explorer-tree"></div>
+        </div>
+        <div class="explorer-viewer">
+        <div class="explorer-viewer-header">
+            <span id="explorer-file-name">—</span>
+            <button id="btn-explorer-download" class="tool-btn" hidden>DOWNLOAD</button>
+            <button id="btn-explorer-save" class="tool-btn" hidden>SAVE</button>
+            <button id="btn-explorer-close-viewer" class="tool-btn" hidden>×</button>
+        </div>
+        <div id="explorer-image-wrap" class="explorer-image-wrap" hidden>
+            <img id="explorer-image" class="explorer-image" alt="preview" />
+        </div>
+        <div id="explorer-editor-wrap" class="explorer-editor-wrap" hidden>
+            <textarea id="explorer-editor"></textarea>
+        </div>
+        <div id="explorer-viewer-empty" class="explorer-viewer-empty">
+            <p>Select a file</p>
+        </div>
+        </div>
+    </div>
+    </section>
+
+    <!-- KEY LOG -->
+    <section id="page-keylog" class="page">
+    <div class="page-header">
+        <h2>KEY LOG</h2>
+        <span class="page-meta" id="keylog-meta">—</span>
+    </div>
+    <div class="keylog-controls">
+        <div class="tool-group">
+        <label class="tool-label">FROM</label>
+        <input type="datetime-local" id="keylog-from" class="tool-input" />
+        </div>
+        <div class="tool-group">
+        <label class="tool-label">TO</label>
+        <input type="datetime-local" id="keylog-to" class="tool-input" />
+        </div>
+        <button id="btn-keylog-apply" class="tool-btn">APPLY</button>
+        <button id="btn-keylog-save" class="tool-btn" disabled>SAVE SELECTED</button>
+    </div>
+    <div id="keylog-list" class="keylog-list"></div>
+    <div id="keylog-empty" class="no-slave-hint visible">
+        <p>No key events</p>
+        <p class="hint">setKeyLog([...]) from Python</p>
+    </div>
+    </section>
+</main>
+
+<!-- SLAVES DRAWER -->
+<aside id="drawer" class="drawer">
+    <div class="drawer-header">
+    <h3>SLAVES</h3>
+    <span class="drawer-sub">of the dungeon</span>
+    <button id="btn-slaves-add-group" class="icon-btn" title="New group" aria-label="New group">+</button>
+    <button id="btn-slaves-refresh" class="icon-btn" title="Refresh slaves" aria-label="Refresh">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M23 4v6h-6"/>
+        <path d="M1 20v-6h6"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+    </button>
+    <button id="btn-drawer-close" class="icon-btn" title="Закрыть" aria-label="Close drawer">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+    </button>
+    </div>
+    <div id="slaves-tree" class="slaves-tree"></div>
+</aside>
+<div id="drawer-overlay" class="drawer-overlay"></div>
+</div>
+
+<div id="announce-container" class="announce-container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>

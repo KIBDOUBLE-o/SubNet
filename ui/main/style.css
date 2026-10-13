@@ -1259,3 +1259,39 @@ html, body {
   letter-spacing: 1px;
   font-size: 10px;
 }
+
+
+/* slave / group DnD */
+.slave-item[draggable="true"],
+.tree-group-header[draggable="true"] { cursor: grab; }
+.slave-item.dragging,
+.tree-group.dragging { opacity: 0.45; }
+.tree-group-header.drop-target,
+.slaves-tree.drop-root.drop-target {
+  outline: 1px dashed var(--accent);
+  background: var(--bg-4);
+}
+.slave-name-input,
+.group-name-input {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--fg-bright);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  width: 100%;
+  outline: none;
+}
+.slave-item .btn-rename-slave {
+  background: none; border: none; color: var(--fg-dim);
+  cursor: pointer; font-size: 10px; padding: 0 4px; opacity: 0;
+}
+.slave-item:hover .btn-rename-slave { opacity: 1; }
+.slave-item .btn-rename-slave:hover { color: var(--fg-bright); }
+
+.explorer-item[draggable="true"] { cursor: grab; }
+.explorer-item.dragging { opacity: 0.4; }
+.explorer-item.drop-target {
+  outline: 1px dashed var(--accent);
+  background: var(--bg-4);
+}

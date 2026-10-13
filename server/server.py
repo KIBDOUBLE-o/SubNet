@@ -49,6 +49,8 @@ class Server:
     def start(self):
         print(f"Listening on {str(address)}")
 
+        self.data_mgr.start_update_loop()
+
         while self.running:
             try:
                 conn, addr = self.conn.accept()
@@ -69,18 +71,7 @@ class Server:
             threading.Thread(target=self.handle_client, args=(client,), daemon=True).start()
 
     def _cmd_get_slaves(self) -> list:
-        with self.clients_lock:
-            return [
-                {
-                    "type": "slave",
-                    "id": str(c.identifier),
-                    "displayName": str(c.identifier),
-                    "ip": c.address.ip,
-                    "ping": -1,
-                    "online": True,
-                }
-                for c in self.clients.values() if c.is_slave
-            ]
+        return self.data_mgr.get_slaves_tree()
 
     def handle_client(self, client: ClientObject):
         sid = client.session_id
@@ -330,6 +321,10 @@ class Server:
             key = str(client.identifier)
             if not client.identifier.is_empty and self.clients_identifier_mapped.get(key) is client:
                 self.clients_identifier_mapped.pop(key, None)
+
+        if client.is_slave and not client.identifier.is_empty:
+            self.data_mgr.on_slave_disconnected(str(client.identifier))
+
         print(f"[-] {client.session_id} disconnected")
 
     def stop(self):
@@ -352,7 +347,6 @@ class Server:
         self.data_mgr.update_data()
 
     def _register_and_dedup(self, client: ClientObject):
-        print(f"[dedup] registering session={client.session_id} identifier={client.identifier} type={client.type}")
         victims = []
 
         with self.clients_lock:
@@ -372,6 +366,9 @@ class Server:
                         victims.append(other)
                 if key:
                     self.clients_identifier_mapped[key] = client
+
+        if client.is_slave and not client.identifier.is_empty:
+            self.data_mgr.on_slave_connected(str(client.identifier), client.address.ip)
 
         for other in victims:
             self._kick(other, reason="duplicate")
