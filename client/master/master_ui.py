@@ -19,6 +19,7 @@ class MasterUI:
         self.fullscreen_window: Window | None = None
         self.maximized = False
 
+        self._password = ""
         self.current_path = ""
 
         self.screen = ScreenStream(
@@ -159,6 +160,7 @@ class MasterUI:
                 ui.master.set_error_callback(ui.on_error)
 
                 if ui.master.start(password):
+                    ui._password = password
                     ui.set_authenticated(True)
                     ui.send_announce("Successful authentication")
                     api.request_slaves()
@@ -294,6 +296,9 @@ class MasterUI:
 
             def on_group_delete(api, name: str):
                 ui._send(f"request group remove {encode_base64(name)}")
+
+            def on_reconnect(api):
+                api.log_in(ui._password)
 
         # main UI
         constructor = WebConstructorDummy()

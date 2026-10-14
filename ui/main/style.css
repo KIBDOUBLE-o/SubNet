@@ -1361,3 +1361,50 @@ html, body {
   outline: 1px dashed var(--accent);
   background: var(--bg-4);
 }
+
+
+/* Reconnect next to SLAVES */
+.btn-reconnect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--fg-dim);
+  cursor: pointer;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.btn-reconnect:hover {
+  background: var(--bg-4);
+  border-color: var(--accent);
+  color: var(--fg-bright);
+}
+.btn-reconnect.spinning svg {
+  animation: spin 0.7s linear;
+}
+
+/* gachi easter: subtle pulse on konami */
+body.gachi-mode .splash-title span,
+body.gachi-mode .app-name {
+  color: #c9a227;
+  text-shadow: 0 0 8px rgba(201, 162, 39, 0.35);
+}
+body.gachi-mode .btn-slaves {
+  border-color: #c9a227;
+}
+.logo-mark {
+  cursor: default;
+  transition: transform 0.2s, color 0.2s;
+}
+.logo-mark:hover { color: var(--fg); }
+
+body.gachi-mode .btn-reconnect { border-color: #c9a227; color: #c9a227; }
+.splash-tagline { transition: color 0.3s; }
+.splash-tagline:hover { color: var(--fg); opacity: 1; }

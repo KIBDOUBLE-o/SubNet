@@ -11,12 +11,15 @@ from pathlib import Path
 from typing import Optional
 
 import pyautogui
+from pynput.keyboard import Controller as KeyController, Key
 
 from client.client import Client, Payload
 from utils import capture_screen, execute_bash, encode_base64, build_local_tree, decode_base64
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
+
+keyboard = KeyController()
 
 QUALITY_MAP = {
     "low": (40, 0.4),
@@ -26,31 +29,35 @@ QUALITY_MAP = {
 }
 
 # browser key -> pyautogui key
-KEY_MAP = {
-    "control": "ctrl",
-    "ctrl": "ctrl",
-    "shift": "shift",
-    "alt": "alt",
-    "meta": "win",
-    "command": "command",
-    "escape": "esc",
-    "esc": "esc",
-    "arrowup": "up",
-    "arrowdown": "down",
-    "arrowleft": "left",
-    "arrowright": "right",
-    " ": "space",
-    "space": "space",
-    "enter": "enter",
-    "return": "enter",
-    "backspace": "backspace",
-    "tab": "tab",
-    "delete": "delete",
-    "home": "home",
-    "end": "end",
-    "pageup": "pageup",
-    "pagedown": "pagedown",
-    "capslock": "capslock",
+PNPUT_KEYS = {
+    "ctrl": Key.ctrl,
+    "control": Key.ctrl,
+    "shift": Key.shift,
+    "alt": Key.alt,
+    "win": Key.cmd,
+    "meta": Key.cmd,
+    "command": Key.cmd,
+    "esc": Key.esc,
+    "escape": Key.esc,
+    "enter": Key.enter,
+    "return": Key.enter,
+    "tab": Key.tab,
+    "space": Key.space,
+    "backspace": Key.backspace,
+    "delete": Key.delete,
+    "up": Key.up,
+    "down": Key.down,
+    "left": Key.left,
+    "right": Key.right,
+    "arrowup": Key.up,
+    "arrowdown": Key.down,
+    "arrowleft": Key.left,
+    "arrowright": Key.right,
+    "home": Key.home,
+    "end": Key.end,
+    "pageup": Key.page_up,
+    "pagedown": Key.page_down,
+    "capslock": Key.caps_lock,
 }
 
 
@@ -146,11 +153,15 @@ class Slave(Client):
         y = int(ny * (self._screen_h - 1))
         return x, y
 
-    def _map_key(self, key: str) -> str:
+    def _resolve_key(self, key: str):
         k = key.strip().lower()
+        if k in PNPUT_KEYS:
+            return PNPUT_KEYS[k]
         if len(k) == 1:
             return k
-        return KEY_MAP.get(k, k)
+        if k.startswith("f") and k[1:].isdigit():
+            return getattr(Key, k, k)
+        return k
 
     def _handle_input(self, tokens: list[str]):
         # tokens: ["input", <action>, ...]
@@ -161,48 +172,49 @@ class Slave(Client):
         try:
             if action == "mouse_move" and len(tokens) >= 4:
                 x, y = self._norm_to_screen(tokens[2], tokens[3])
-                pyautogui.moveTo(x, y, _pause=False)
+                pyautogui.moveTo(x, y)
 
             elif action == "mouse_down" and len(tokens) >= 5:
                 btn = tokens[2]
                 x, y = self._norm_to_screen(tokens[3], tokens[4])
-                pyautogui.moveTo(x, y, _pause=False)
-                pyautogui.mouseDown(button=btn, _pause=False)
+                pyautogui.moveTo(x, y)
+                pyautogui.mouseDown(button=btn)
 
             elif action == "mouse_up" and len(tokens) >= 5:
                 btn = tokens[2]
                 x, y = self._norm_to_screen(tokens[3], tokens[4])
-                pyautogui.moveTo(x, y, _pause=False)
-                pyautogui.mouseUp(button=btn, _pause=False)
-
-            elif action == "mouse_click" and len(tokens) >= 5:
-                btn = tokens[2]
-                x, y = self._norm_to_screen(tokens[3], tokens[4])
-                pyautogui.click(x=x, y=y, button=btn, _pause=False)
+                pyautogui.moveTo(x, y)
+                pyautogui.mouseUp(button=btn)
 
             elif action == "mouse_scroll" and len(tokens) >= 4:
-                dx, dy = int(float(tokens[2])), int(float(tokens[3]))
+                dy = int(float(tokens[3]))
                 if dy:
-                    pyautogui.scroll(dy, _pause=False)
-                if dx:
-                    try:
-                        pyautogui.hscroll(dx, _pause=False)
-                    except Exception:
-                        pass
+                    pyautogui.scroll(dy)
 
             elif action == "key_down" and len(tokens) >= 3:
-                pyautogui.keyDown(self._map_key(tokens[2]), _pause=False)
+                k = self._resolve_key(tokens[2])
+                print(f"[input] key_down {tokens[2]!r} -> {k!r}")
+                keyboard.press(k)
 
             elif action == "key_up" and len(tokens) >= 3:
-                pyautogui.keyUp(self._map_key(tokens[2]), _pause=False)
+                k = self._resolve_key(tokens[2])
+                print(f"[input] key_up {tokens[2]!r} -> {k!r}")
+                keyboard.release(k)
+
 
             elif action == "key_tap" and len(tokens) >= 3:
-                pyautogui.press(self._map_key(tokens[2]), _pause=False)
+                k = self._resolve_key(tokens[2])
+                keyboard.press(k)
+                keyboard.release(k)
+
 
             elif action == "key_hotkey" and len(tokens) >= 3:
-                keys = [self._map_key(k) for k in tokens[2].split("+") if k]
-                if keys:
-                    pyautogui.hotkey(*keys, _pause=False)
+                keys = [self._resolve_key(k) for k in tokens[2].split("+") if k]
+                for k in keys:
+                    keyboard.press(k)
+
+                for k in reversed(keys):
+                    keyboard.release(k)
 
         except Exception as e:
             print(f"[slave] input error: {e} | {tokens}")
