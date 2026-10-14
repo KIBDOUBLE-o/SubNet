@@ -292,7 +292,7 @@ class MasterUI:
             def on_group_create(api, name: str):
                 ui._send(f"request group create {encode_base64(name)}")
 
-            def on_group_remove(api, name: str):
+            def on_group_delete(api, name: str):
                 ui._send(f"request group remove {encode_base64(name)}")
 
         # main UI

@@ -286,6 +286,7 @@ class Server:
                                             self.data_mgr._write_unlocked()
                                         client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
 
+
                                     elif action == "remove":
                                         if len(group_parts) < 2:
                                             client.send("error;request;Usage: request group remove <name>")
@@ -293,11 +294,16 @@ class Server:
 
                                         name = decode_base64(group_parts[1])
                                         with self.data_mgr.lock:
-                                            self.data_mgr.data["slaves"] = [
-                                                n for n in self.data_mgr.data["slaves"]
-                                                if not (n.get("type") == "group" and n.get("name") == name)
-                                            ]
+                                            new_root = []
+                                            for n in self.data_mgr.data["slaves"]:
+                                                if n.get("type") == "group" and n.get("name") == name:
+                                                    new_root.extend(n.get("children", []))
+                                                else:
+                                                    new_root.append(n)
+
+                                            self.data_mgr.data["slaves"] = new_root
                                             self.data_mgr._write_unlocked()
+
                                         client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
 
                                     elif action == "slave_rename":

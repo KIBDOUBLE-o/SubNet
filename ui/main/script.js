@@ -20,6 +20,7 @@
  *   on_slave_group_changed(id, group|null)
  *   on_group_rename(oldName, newName)
  *   on_group_create(name)
+ *   on_group_delete(name)
  *   onKeyLogTimeRangeSet, onKeyLogSave
  */
 
@@ -273,22 +274,33 @@
     header.innerHTML =
       '<span class="chevron">▼</span>' +
       '<span class="group-name">' + escapeHtml(group.name) + '</span>' +
-      '<span class="group-count" style="margin-left:auto;opacity:0.5">' + ((group.children || []).length) + '</span>';
+      '<span class="group-count">' + ((group.children || []).length) + '</span>' +
+      '<span class="group-actions">' +
+        '<button type="button" data-act="rename" title="Rename group">✎</button>' +
+        '<button type="button" data-act="delete" class="danger" title="Delete group">×</button>' +
+      '</span>';
 
     header.addEventListener('click', (e) => {
-      if (e.target.closest('.group-name-input')) return;
+      if (e.target.closest('.group-name-input') || e.target.closest('.group-actions')) return;
       el.classList.toggle('collapsed');
       callPython('on_group_toggle', group.name, el.classList.contains('collapsed'));
     });
 
-    // rename group on double-click name
     const nameSpan = header.querySelector('.group-name');
     nameSpan.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       startGroupRename(group, nameSpan);
     });
+    header.querySelector('[data-act="rename"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      startGroupRename(group, nameSpan);
+    });
+    header.querySelector('[data-act="delete"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete group "' + group.name + '"? Slaves will be ungrouped.')) return;
+      callPython('on_group_delete', group.name);
+    });
 
-    // accept slave drops into group
     header.addEventListener('dragover', (e) => {
       if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
       e.preventDefault();
@@ -331,13 +343,17 @@
   }
 
   function startGroupRename(group, nameSpan) {
+    if (!nameSpan || !nameSpan.parentNode) return;
     const input = document.createElement('input');
     input.className = 'group-name-input';
     input.value = group.name;
     nameSpan.replaceWith(input);
     input.focus();
     input.select();
+    let done = false;
     const commit = () => {
+      if (done) return;
+      done = true;
       const next = input.value.trim();
       if (next && next !== group.name) {
         callPython('on_group_rename', group.name, next);
@@ -347,7 +363,7 @@
     };
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      if (e.key === 'Escape') renderSlavesTree();
+      if (e.key === 'Escape') { done = true; renderSlavesTree(); }
     });
     input.addEventListener('blur', commit);
   }
@@ -360,10 +376,17 @@
     const pingStr = slave.ping != null ? slave.ping + ' ms' : '—';
     el.innerHTML =
       '<span class="slave-status ' + (slave.online ? 'online' : '') + '"></span>' +
-      '<span class="slave-name">' + escapeHtml(slave.displayName || slave.id) + '</span>' +
-      '<button type="button" class="btn-rename-slave" title="Rename">✎</button>' +
-      '<div class="slave-meta"><span class="id">' + escapeHtml(slave.id) + '</span>' +
-      '<span>' + escapeHtml(slave.ip || '—') + '</span><span>' + pingStr + '</span></div>';
+      '<div class="slave-body">' +
+        '<div class="slave-name-row">' +
+          '<span class="slave-name">' + escapeHtml(slave.displayName || slave.id) + '</span>' +
+          '<button type="button" class="btn-rename-slave" title="Rename">✎</button>' +
+        '</div>' +
+        '<div class="slave-meta">' +
+          '<span class="id">' + escapeHtml(slave.id) + '</span>' +
+          '<span>' + escapeHtml(slave.ip || '—') + '</span>' +
+          '<span>' + pingStr + '</span>' +
+        '</div>' +
+      '</div>';
 
     el.addEventListener('click', (e) => {
       if (e.target.closest('.btn-rename-slave') || e.target.closest('.slave-name-input')) return;
@@ -377,13 +400,19 @@
     const nameEl = el.querySelector('.slave-name');
     const startRename = (e) => {
       if (e) e.stopPropagation();
+      const row = el.querySelector('.slave-name-row');
       const input = document.createElement('input');
       input.className = 'slave-name-input';
       input.value = slave.displayName || slave.id;
       nameEl.replaceWith(input);
+      const btn = row.querySelector('.btn-rename-slave');
+      if (btn) btn.hidden = true;
       input.focus();
       input.select();
+      let done = false;
       const commit = () => {
+        if (done) return;
+        done = true;
         const next = input.value.trim();
         if (next && next !== (slave.displayName || slave.id)) {
           slave.displayName = next;
@@ -394,7 +423,7 @@
       };
       input.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-        if (ev.key === 'Escape') renderSlavesTree();
+        if (ev.key === 'Escape') { done = true; renderSlavesTree(); }
       });
       input.addEventListener('blur', commit);
     };

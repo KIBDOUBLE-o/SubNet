@@ -786,7 +786,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 10px 6px 12px;
   cursor: pointer;
   color: var(--fg-dim);
   font-size: 11px;
@@ -806,17 +806,54 @@ html, body {
   font-size: 9px;
   transition: transform 0.15s;
   color: var(--fg-dim);
+  flex-shrink: 0;
 }
+
+.tree-group-header .group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-group-header .group-count {
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.tree-group-header .group-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.tree-group-header:hover .group-actions { opacity: 1; }
+
+.tree-group-header .group-actions button {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 2px 5px;
+  line-height: 1;
+}
+
+.tree-group-header .group-actions button:hover { color: var(--fg-bright); }
+.tree-group-header .group-actions button.danger:hover { color: #c66; }
 
 .tree-group.collapsed .chevron { transform: rotate(-90deg); }
 .tree-group.collapsed .tree-group-body { display: none; }
 .tree-group-body { padding-left: 8px; }
 
 .slave-item {
-  display: grid;
-  grid-template-columns: 10px 1fr;
-  gap: 0 10px;
-  padding: 8px 14px 8px 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px 8px 16px;
   cursor: pointer;
   border-left: 2px solid transparent;
   transition: background 0.12s, border-color 0.12s;
@@ -834,8 +871,7 @@ html, body {
   border-radius: 50%;
   background: #444;
   margin-top: 5px;
-  grid-row: 1 / 3;
-  align-self: start;
+  flex-shrink: 0;
 }
 
 .slave-status.online {
@@ -843,20 +879,38 @@ html, body {
   box-shadow: 0 0 4px var(--green-dim);
 }
 
+.slave-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.slave-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .slave-name {
   font-size: 12px;
   color: var(--fg-bright);
   letter-spacing: 0.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .slave-meta {
-  grid-column: 2;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
+  gap: 4px 10px;
   font-size: 10px;
   color: var(--fg-dim);
-  margin-top: 2px;
 }
 
 .slave-meta span { white-space: nowrap; }
@@ -1283,11 +1337,23 @@ html, body {
   outline: none;
 }
 .slave-item .btn-rename-slave {
-  background: none; border: none; color: var(--fg-dim);
-  cursor: pointer; font-size: 10px; padding: 0 4px; opacity: 0;
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  opacity: 0;
+  flex-shrink: 0;
+  line-height: 1;
+  font-family: inherit;
 }
 .slave-item:hover .btn-rename-slave { opacity: 1; }
 .slave-item .btn-rename-slave:hover { color: var(--fg-bright); }
+.slave-name-input {
+  flex: 1;
+  min-width: 0;
+}
 
 .explorer-item[draggable="true"] { cursor: grab; }
 .explorer-item.dragging { opacity: 0.4; }
