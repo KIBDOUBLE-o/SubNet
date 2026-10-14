@@ -1,5 +1,6 @@
 import socket
 import struct
+import time
 from socket import socket as con
 
 from objects.address import Address
@@ -9,13 +10,17 @@ from utils import fast_hash
 
 
 class ClientObject:
-    __slots__ = ('address', 'connection', 'identifier', 'type')
+    __slots__ = ('address', 'connection', 'identifier', 'type', 'last_pong', 'ping_sent_at', 'rtt_ms')
 
     def __init__(self, address: Address, connection: con):
         self.address = address
         self.connection = connection
         self.identifier = Identifier.empty()
         self.type = ClientType.UnTyped
+
+        self.last_pong: float = time.monotonic()
+        self.ping_sent_at: float | None = None
+        self.rtt_ms: int | None = None
 
     @property
     def session_id(self):

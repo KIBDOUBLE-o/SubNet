@@ -271,6 +271,11 @@ class MasterUI:
                 path = path.replace("/", "\\")
                 ui._send(f"request slave {ui.active_slave} remove {path} {is_folder}")
 
+            def on_move(self, path: str, new_path: str):
+                path = path.replace("/", "\\")
+                new_path = new_path.replace("/", "\\")
+                ui._send(f"request slave {ui.active_slave} move {path} {new_path}")
+
             def on_file_download(self, path: str):
                 pass
 

@@ -10,6 +10,7 @@ class DataManager:
         self.lock = threading.Lock()
         self.last_update_time = 0.0
         self.reload_data()
+        self._runtime: dict[str, dict] = {}
 
     @property
     def slaves(self) -> list:
@@ -70,33 +71,40 @@ class DataManager:
         return None
 
     def on_slave_connected(self, slave_id: str, ip: str):
+        self._runtime[slave_id] = {"online": True, "ip": ip, "ping": None}
         with self.lock:
             node = self._find_slave(self.data["slaves"], slave_id)
-            if node:
-                node["ip"] = ip
-                node["online"] = True
-            else:
+            if not node:
                 self.data["slaves"].append({
                     "type": "slave",
                     "id": slave_id,
                     "displayName": slave_id,
-                    "ip": ip,
-                    "ping": None,
-                    "online": True,
                 })
-            self._write_unlocked()
+                self._write_unlocked()
+
+    def set_ping(self, slave_id: str, rtt_ms: int | None):
+        rt = self._runtime.get(slave_id)
+        if rt is not None:
+            rt["ping"] = rtt_ms
 
     def on_slave_disconnected(self, slave_id: str):
-        with self.lock:
-            node = self._find_slave(self.data["slaves"], slave_id)
-            if node:
-                node["online"] = False
-                node["ping"] = None
-                self._write_unlocked()
+        self._runtime.pop(slave_id, None)
 
     def get_slaves_tree(self) -> list:
         with self.lock:
-            return json.loads(json.dumps(self.data["slaves"]))
+            tree = json.loads(json.dumps(self.data["slaves"]))
+        self._apply_runtime(tree)
+        return tree
+
+    def _apply_runtime(self, nodes: list):
+        for node in nodes:
+            if node.get("type") == "slave":
+                rt = self._runtime.get(node["id"], {})
+                node["online"] = rt.get("online", False)
+                node["ip"] = rt.get("ip", None)
+                node["ping"] = rt.get("ping", None)
+            elif node.get("type") == "group":
+                self._apply_runtime(node.get("children", []))
 
     def _remove_slave(self, nodes: list, slave_id: str) -> dict | None:
         """Вырезает slave из дерева, возвращает его или None."""

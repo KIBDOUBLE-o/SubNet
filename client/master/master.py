@@ -50,6 +50,9 @@ class Master(Client):
             self.ui.send_announce("Disconnected from server", "warn")
 
     def on_message(self, message: str) -> Optional[Payload]:
+        if message.strip() == "ping":
+            return "pong"
+
         if message.startswith("slaves"):
             tree = json.loads(message[6:].lstrip())
             self._set_slaves(tree)

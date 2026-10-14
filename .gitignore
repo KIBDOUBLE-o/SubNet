@@ -1,2 +1,7 @@
 /client/master/web_constructor.py
 /settings.py
+/build/
+/dist/
+/master.spec
+/ros2.jpg
+/slave.spec

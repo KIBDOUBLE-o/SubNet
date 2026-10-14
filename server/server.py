@@ -1,6 +1,7 @@
 import json
 import socket
 import threading
+import time
 
 from objects.identifier import Identifier
 from server.client_object import ClientObject
@@ -51,6 +52,7 @@ class Server:
         print(f"Listening on {str(address)}")
 
         self.data_mgr.start_update_loop()
+        self._start_ping_loop()
 
         while self.running:
             try:
@@ -73,6 +75,31 @@ class Server:
 
     def _cmd_get_slaves(self) -> list:
         return self.data_mgr.get_slaves_tree()
+
+    def _start_ping_loop(self):
+        def loop():
+            while self.running:
+                time.sleep(5)
+                with self.clients_lock:
+                    targets = list(self.clients.values())
+
+                now = time.monotonic()
+                for client in targets:
+                    if client.is_untyped:
+                        continue
+
+                    if now - client.last_pong > 30:
+                        print(f"[ping] session={client.session_id} | no pong, kicking")
+                        self._kick(client, reason="ping_timeout")
+                        continue
+
+                    client.ping_sent_at = time.monotonic()
+                    try:
+                        client.send("ping")
+                    except Exception:
+                        pass
+
+        threading.Thread(target=loop, daemon=True).start()
 
     def handle_client(self, client: ClientObject):
         sid = client.session_id
@@ -101,6 +128,17 @@ class Server:
                 rest = parts[1] if len(parts) > 1 else ""
 
                 try:
+                    if root == "pong":
+                        now = time.monotonic()
+                        client.last_pong = now
+                        if client.ping_sent_at is not None:
+                            rtt = int((now - client.ping_sent_at) * 1000)
+                            client.rtt_ms = rtt
+                            client.ping_sent_at = None
+                            if client.is_slave and not client.identifier.is_empty:
+                                self.data_mgr.set_ping(str(client.identifier), rtt)
+                        continue
+
                     if client.is_untyped:
                         if root == "auth":
                             auth_parts = rest.split(maxsplit=1)
@@ -121,35 +159,32 @@ class Server:
                                 client.send("error;auth;Identifier is empty")
                                 continue
 
-                            is_master_connecting = (
-                                    self.auth_attempt(password) and password != "wrong"
-                            )
+                            is_master = self.auth_attempt(password)
+                            auth_ok = is_master or password == "wrong"
+
+                            if not auth_ok:
+                                print(f"[auth] session={sid} | fail (bad password)")
+                                client.send("auth;fail")
+                                continue
 
                             with self.clients_lock:
                                 client.identifier = Identifier(identifier)
-                                if is_master_connecting:
-                                    client.type = ClientType.Master
-                                else:
-                                    client.type = ClientType.Slave
+                                client.type = ClientType.Master if is_master else ClientType.Slave
 
                             self._register_and_dedup(client)
 
-                            if is_master_connecting:
+                            if is_master:
                                 print(
                                     f"[auth] session={sid} | master ok "
                                     f"| identifier={client.identifier}"
                                 )
-                                client.send(f"auth;ok;{client.identifier}")
                             else:
-                                if password != "wrong" and not self.auth_attempt(password):
-                                    print(f"[auth] session={sid} | fail (bad password)")
-                                    client.send("auth;fail")
-                                else:
-                                    print(
-                                        f"[auth] session={sid} | slave ok "
-                                        f"| identifier={client.identifier}"
-                                    )
-                                    client.send(f"auth;ok;{client.identifier}")
+                                print(
+                                    f"[auth] session={sid} | slave ok "
+                                    f"| identifier={client.identifier}"
+                                )
+
+                            client.send(f"auth;ok;{client.identifier}")
 
                     else:
                         if client.is_master:
@@ -265,7 +300,6 @@ class Server:
                                             self.data_mgr._write_unlocked()
                                         client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
 
-
                                     elif action == "slave_rename":
                                         if len(group_parts) < 3:
                                             client.send("error;request;Usage: request group slave_rename <id> <name>")
@@ -362,7 +396,8 @@ class Server:
                                         f"send {subject} {payload}"
                                     )
                                 except KeyError:
-                                    print(f"[error] session={sid} | slave send | target not found: {target} all identifiers: {list(self.clients_identifier_mapped.keys())}")
+                                    print(
+                                        f"[error] session={sid} | slave send | target not found: {target} all identifiers: {list(self.clients_identifier_mapped.keys())}")
                                     client.send(
                                         f"error;send;Target not found: {target}"
                                     )
@@ -394,10 +429,14 @@ class Server:
         client.close()
         with self.clients_lock:
             if self.clients.get(client.session_id) is client:
-                self.clients.pop(client.session_id, None)
+                self.clients.pop(client.session_id)
+
             key = str(client.identifier)
-            if not client.identifier.is_empty and self.clients_identifier_mapped.get(key) is client:
-                self.clients_identifier_mapped.pop(key, None)
+            if (
+                    not client.identifier.is_empty
+                    and self.clients_identifier_mapped.get(key) is client
+            ):
+                self.clients_identifier_mapped.pop(key)
 
         if client.is_slave and not client.identifier.is_empty:
             self.data_mgr.on_slave_disconnected(str(client.identifier))
@@ -444,6 +483,7 @@ class Server:
                 if key:
                     self.clients_identifier_mapped[key] = client
 
+        # on_slave_connected до кика — новый клиент уже в маппинге
         if client.is_slave and not client.identifier.is_empty:
             self.data_mgr.on_slave_connected(str(client.identifier), client.address.ip)
 

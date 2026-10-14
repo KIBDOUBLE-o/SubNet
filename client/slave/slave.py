@@ -77,6 +77,12 @@ class Slave(Client):
             self._stop_stream()
             self.stop()
 
+    def on_auth_success(self, response: str) -> None:
+        print(f"Auth success: {response}")
+
+    def on_disconnected(self) -> None:
+        print("Disconnected.")
+
     # ---------- stream (как было) ----------
 
     def _start_stream(self, master: str, fps: int, quality_name: str):
@@ -202,6 +208,9 @@ class Slave(Client):
             print(f"[slave] input error: {e} | {tokens}")
 
     def on_message(self, message: str) -> Optional[Payload]:
+        if message.strip() == "ping":
+            return "pong"
+
         tokens = message.split()
         if not tokens or tokens[0] != "request" or len(tokens) < 2:
             return None
@@ -318,7 +327,20 @@ class Slave(Client):
                 if master:
                     self.send(f"send local {master} {encode_base64(json.dumps(local))}")
             except Exception as e:
-                print(f"[slave] file saving error: {e}")
+                print(f"[slave] file renaming error: {e}")
+
+        elif subject == "move":
+            path = " ".join(tokens[2:-2])
+            new_path = decode_base64(tokens[-2])
+            master = tokens[-1]
+            try:
+                if os.path.exists(path):
+                    shutil.move(path, new_path)
+                local = build_local_tree("\\".join(path.split("\\")[:-1]))
+                if master:
+                    self.send(f"send local {master} {encode_base64(json.dumps(local))}")
+            except Exception as e:
+                print(f"[slave] file moving error: {e}")
 
         elif subject == "bash_execution":
             bash = " ".join(tokens[2:-1])
