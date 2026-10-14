@@ -271,6 +271,25 @@ class MasterUI:
                 path = path.replace("/", "\\")
                 ui._send(f"request slave {ui.active_slave} remove {path} {is_folder}")
 
+            def on_file_download(self, path: str):
+                pass
+
+            def on_slave_display_name_changed(api, identifier: str, display_name: str):
+                ui._send(f"request group slave_rename {encode_base64(identifier)} {encode_base64(display_name)}")
+
+            def on_slave_group_changed(api, identifier: str, group: str | None):
+                ui._send(f"request group move_slave {encode_base64(identifier)} {encode_base64(group)}")
+                print(f"{identifier} -> {group}")
+
+            def on_group_rename(api, old: str, new: str):
+                ui._send(f"request group rename {encode_base64(old)} {encode_base64(new)}")
+
+            def on_group_create(api, name: str):
+                ui._send(f"request group create {encode_base64(name)}")
+
+            def on_group_remove(api, name: str):
+                ui._send(f"request group remove {encode_base64(name)}")
+
         # main UI
         constructor = WebConstructorDummy()
         if os.path.exists("ui"):

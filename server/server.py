@@ -7,6 +7,7 @@ from server.client_object import ClientObject
 from server.client_type import ClientType
 from server.data_manager import DataManager
 from settings import *
+from utils import decode_base64
 
 
 class Server:
@@ -212,6 +213,82 @@ class Server:
                                         client.send(
                                             f"error;request;Failed to send to slave {target}: {e}"
                                         )
+
+                                elif subject == "group":
+                                    if len(req_parts) < 2:
+                                        client.send("error;request;Missing group action")
+                                        continue
+
+                                    group_parts = req_parts[1].split(maxsplit=2)
+                                    action = group_parts[0] if group_parts else ""
+                                    if action == "create":
+                                        if len(group_parts) < 2:
+                                            client.send("error;request;Usage: request group create <name>")
+                                            continue
+
+                                        name = decode_base64(group_parts[1])
+                                        with self.data_mgr.lock:
+                                            self.data_mgr.data["slaves"].append({
+                                                "type": "group",
+                                                "name": name,
+                                                "children": []
+                                            })
+                                            self.data_mgr._write_unlocked()
+                                        client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
+
+                                    elif action == "rename":
+                                        if len(group_parts) < 3:
+                                            client.send("error;request;Usage: request group rename <old> <new>")
+                                            continue
+
+                                        old_name = decode_base64(group_parts[1])
+                                        new_name = decode_base64(group_parts[2])
+                                        with self.data_mgr.lock:
+                                            for node in self.data_mgr.data["slaves"]:
+                                                if node.get("type") == "group" and node.get("name") == old_name:
+                                                    node["name"] = new_name
+                                                    break
+                                            self.data_mgr._write_unlocked()
+                                        client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
+
+                                    elif action == "remove":
+                                        if len(group_parts) < 2:
+                                            client.send("error;request;Usage: request group remove <name>")
+                                            continue
+
+                                        name = decode_base64(group_parts[1])
+                                        with self.data_mgr.lock:
+                                            self.data_mgr.data["slaves"] = [
+                                                n for n in self.data_mgr.data["slaves"]
+                                                if not (n.get("type") == "group" and n.get("name") == name)
+                                            ]
+                                            self.data_mgr._write_unlocked()
+                                        client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
+
+
+                                    elif action == "slave_rename":
+                                        if len(group_parts) < 3:
+                                            client.send("error;request;Usage: request group slave_rename <id> <name>")
+                                            continue
+                                        slave_id = decode_base64(group_parts[1])
+                                        display_name = decode_base64(group_parts[2])
+                                        self.data_mgr.rename_slave(slave_id, display_name)
+                                        client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
+
+                                    elif action == "move_slave":
+                                        if len(group_parts) < 2:
+                                            client.send("error;request;Usage: request group move_slave <id> [group]")
+                                            continue
+
+                                        slave_id = decode_base64(group_parts[1])
+                                        raw_group = decode_base64(group_parts[2]) if len(group_parts) > 2 else None
+                                        group_name = None if raw_group in (None, "null", "", "None") else raw_group
+                                        print(f"[move_slave] slave_id={slave_id}, group={group_name}")
+                                        self.data_mgr.move_slave(slave_id, group_name)
+                                        client.send(f"slaves{json.dumps(self._cmd_get_slaves())}")
+
+                                    else:
+                                        client.send(f"error;request;Unknown group action '{action}'")
 
                                 else:
                                     print(f"[error] session={sid} | request | unknown subject '{subject}'")

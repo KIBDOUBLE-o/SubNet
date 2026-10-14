@@ -97,3 +97,41 @@ class DataManager:
     def get_slaves_tree(self) -> list:
         with self.lock:
             return json.loads(json.dumps(self.data["slaves"]))
+
+    def _remove_slave(self, nodes: list, slave_id: str) -> dict | None:
+        """Вырезает slave из дерева, возвращает его или None."""
+        for i, node in enumerate(nodes):
+            if node.get("type") == "slave" and node.get("id") == slave_id:
+                return nodes.pop(i)
+            if node.get("type") == "group":
+                found = self._remove_slave(node.get("children", []), slave_id)
+                if found:
+                    return found
+        return None
+
+    def rename_slave(self, slave_id: str, display_name: str) -> bool:
+        with self.lock:
+            node = self._find_slave(self.data["slaves"], slave_id)
+            if not node:
+                return False
+            node["displayName"] = display_name
+            self._write_unlocked()
+        return True
+
+    def move_slave(self, slave_id: str, group_name: str | None) -> bool:
+        with self.lock:
+            slave = self._remove_slave(self.data["slaves"], slave_id)
+            if not slave:
+                return False
+            if group_name is None:
+                self.data["slaves"].append(slave)
+            else:
+                for node in self.data["slaves"]:
+                    if node.get("type") == "group" and node.get("name") == group_name:
+                        node["children"].append(slave)
+                        break
+                else:
+                    # группа не найдена — вернуть на место в корень
+                    self.data["slaves"].append(slave)
+            self._write_unlocked()
+        return True
