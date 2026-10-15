@@ -1,5 +1,4 @@
-import json
-from client.master.crypto import Crypto
+from crypto import Crypto
 
 
 class PDOperator:

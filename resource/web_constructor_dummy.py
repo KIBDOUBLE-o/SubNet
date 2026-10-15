@@ -1,4 +1,4 @@
-from client.master.web_constructor import WebConstructor
+from resource.web_constructor import WebConstructor
 
 
 class WebConstructorDummy(WebConstructor):

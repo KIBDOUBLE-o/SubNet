@@ -1,4 +1,4 @@
-/client/master/web_constructor.py
+/resource/web_constructor.py
 /settings.py
 /build/
 /dist/
@@ -6,3 +6,4 @@
 /ros2.jpg
 /slave.spec
 /icon.png
+/resource/resources_bundle.py
