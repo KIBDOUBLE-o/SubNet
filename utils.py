@@ -8,6 +8,63 @@ import subprocess
 
 LETTERS = string.ascii_uppercase
 
+from typing import Any
+
+
+class SimCode:
+    __slots__ = 'value'
+
+    def __init__(self, hexadecimal = ""):
+        self.value = hexadecimal
+
+    @property
+    def integer(self):
+        return int(self.value, 16)
+
+    @staticmethod
+    def create(source: str) -> 'SimCode':
+        unicodes = [ord(c) for c in source]
+
+        code = 0
+        for i in range(len(unicodes)):
+            unicode = unicodes[i]
+
+            code += unicode * (i + 1)
+
+        return SimCode(hex(code)[2:])
+
+    def is_similar_with(self, threshold: int, source: str | Any | None = None, log=False) -> bool:
+        if isinstance(source, str):
+            return self.is_similar_with(threshold, source=SimCode.create(source))
+
+        if not isinstance(source, SimCode):
+            return False
+
+        difference = abs(self.integer - source.integer)
+
+        result = difference <= threshold
+
+        if log:
+            print(f"""
+            Hex:
+            - Self:     {self.value}
+            - Checking: {source.value}
+
+            Integer:
+            - Self:     {self.integer}
+            - Checking: {source.integer}
+
+            Difference:
+            - Hex:      {hex(difference)[2:]}
+            - Dec:      {difference}
+
+            Is Similar({threshold}): 
+            - Value:    {"yes" if result else "no"}
+            """)
+
+        return result
+
+
 def fast_hash(content: str) -> str:
     return sha256(content.encode("utf-8")).hexdigest()
 
@@ -41,6 +98,15 @@ def build_local_tree(path: str) -> list:
                 })
 
     return folder
+
+def notify(title: str, message: str):
+    from winotify import Notification
+
+    Notification(
+        app_id="SubNet",
+        title=title,
+        msg=message
+    ).show()
 
 def encode_base64(data: str) -> str:
     return base64.b64encode(data.encode(errors="replace")).decode("ascii")

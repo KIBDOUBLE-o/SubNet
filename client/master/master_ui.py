@@ -298,6 +298,8 @@ class MasterUI:
                 ui._send(f"request group remove {encode_base64(name)}")
 
             def on_reconnect(api):
+                ui.master.close()
+                ui.master = None
                 api.log_in(ui._password)
 
         # main UI

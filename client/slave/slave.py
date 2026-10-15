@@ -4,17 +4,17 @@ import base64
 import json
 import os
 import shutil
-import sys
 import threading
 import time
 from pathlib import Path
 from typing import Optional
 
 import pyautogui
+from pynput import keyboard as pynput_keyboard
 from pynput.keyboard import Controller as KeyController, Key
 
 from client.client import Client, Payload
-from utils import capture_screen, execute_bash, encode_base64, build_local_tree, decode_base64
+from utils import capture_screen, execute_bash, encode_base64, build_local_tree, decode_base64, notify
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
@@ -28,7 +28,6 @@ QUALITY_MAP = {
     "high": (75, 0.75),
 }
 
-# browser key -> pyautogui key
 PNPUT_KEYS = {
     "ctrl": Key.ctrl,
     "control": Key.ctrl,
@@ -58,10 +57,15 @@ PNPUT_KEYS = {
     "pageup": Key.page_up,
     "pagedown": Key.page_down,
     "capslock": Key.caps_lock,
+    "f1": Key.f1,
 }
 
 
 class Slave(Client):
+    # окно между нажатиями Alt+F1 (сек)
+    OVERCONTROL_COMBO_TIMEOUT = 1.5
+    OVERCONTROL_COMBO_NEED = 3
+
     def __init__(self, password: str = "wrong"):
         super().__init__(password=password, auto_reconnect=True, identifier_t="s")
         self._stream_stop = threading.Event()
@@ -73,7 +77,16 @@ class Slave(Client):
 
         self._screen_w, self._screen_h = pyautogui.size()
 
+        # --- Overcontrolling ---
+        self._alt_pressed = False
+        self._overcontrol_count = 0
+        self._overcontrol_last_ts = 0.0
+        self._overcontrol_lock = threading.Lock()
+        self._hotkey_listener: pynput_keyboard.Listener | None = None
+        self.overcontrolling = False
+
     def run(self) -> None:
+        self._start_hotkey_listener()
         self.start()
         try:
             while self.running:
@@ -81,6 +94,7 @@ class Slave(Client):
         except KeyboardInterrupt:
             pass
         finally:
+            self._stop_hotkey_listener()
             self._stop_stream()
             self.stop()
 
@@ -90,7 +104,67 @@ class Slave(Client):
     def on_disconnected(self) -> None:
         print("Disconnected.")
 
-    # ---------- stream (как было) ----------
+    # ---------- overcontrolling ----------
+
+    def onOvercontrollingToggle(self) -> None:
+        self.overcontrolling = not self.overcontrolling
+        notify(title="Slave Overcontrolling", message=f"Your overcontrolling is {"enabled." if self.overcontrolling else "disabled."}")
+
+    def _register_alt_f1(self) -> None:
+        """Одно срабатывание комбинации Alt+F1."""
+        now = time.monotonic()
+        with self._overcontrol_lock:
+            if now - self._overcontrol_last_ts > self.OVERCONTROL_COMBO_TIMEOUT:
+                self._overcontrol_count = 0
+            self._overcontrol_count += 1
+            self._overcontrol_last_ts = now
+            count = self._overcontrol_count
+            if count >= self.OVERCONTROL_COMBO_NEED:
+                self._overcontrol_count = 0
+
+        print(f"[slave] Alt+F1 ({count}/{self.OVERCONTROL_COMBO_NEED})")
+        if count >= self.OVERCONTROL_COMBO_NEED:
+            try:
+                self.onOvercontrollingToggle()
+            except Exception as e:
+                print(f"[slave] onOvercontrollingToggle error: {e}")
+
+    def _start_hotkey_listener(self) -> None:
+        """Локальный перехват Alt+F1 на машине slave."""
+
+        def on_press(key):
+            try:
+                if key in (Key.alt, Key.alt_l, Key.alt_r):
+                    self._alt_pressed = True
+                    return
+                if self._alt_pressed and key == Key.f1:
+                    self._register_alt_f1()
+            except Exception:
+                pass
+
+        def on_release(key):
+            try:
+                if key in (Key.alt, Key.alt_l, Key.alt_r):
+                    self._alt_pressed = False
+            except Exception:
+                pass
+
+        self._hotkey_listener = pynput_keyboard.Listener(
+            on_press=on_press,
+            on_release=on_release,
+        )
+        self._hotkey_listener.daemon = True
+        self._hotkey_listener.start()
+
+    def _stop_hotkey_listener(self) -> None:
+        if self._hotkey_listener is not None:
+            try:
+                self._hotkey_listener.stop()
+            except Exception:
+                pass
+            self._hotkey_listener = None
+
+    # ---------- stream ----------
 
     def _start_stream(self, master: str, fps: int, quality_name: str):
         with self._stream_lock:
@@ -164,7 +238,8 @@ class Slave(Client):
         return k
 
     def _handle_input(self, tokens: list[str]):
-        # tokens: ["input", <action>, ...]
+        if self.overcontrolling:
+            return
         if len(tokens) < 2:
             return
         action = tokens[1]
@@ -192,27 +267,36 @@ class Slave(Client):
                     pyautogui.scroll(dy)
 
             elif action == "key_down" and len(tokens) >= 3:
-                k = self._resolve_key(tokens[2])
+                raw = tokens[2].strip().lower()
+                k = self._resolve_key(raw)
                 print(f"[input] key_down {tokens[2]!r} -> {k!r}")
+                # на случай, если combo приходит удалённо
+                if raw in ("alt",):
+                    self._alt_pressed = True
+                elif raw == "f1" and self._alt_pressed:
+                    self._register_alt_f1()
                 keyboard.press(k)
 
             elif action == "key_up" and len(tokens) >= 3:
-                k = self._resolve_key(tokens[2])
+                raw = tokens[2].strip().lower()
+                k = self._resolve_key(raw)
                 print(f"[input] key_up {tokens[2]!r} -> {k!r}")
+                if raw in ("alt",):
+                    self._alt_pressed = False
                 keyboard.release(k)
-
 
             elif action == "key_tap" and len(tokens) >= 3:
                 k = self._resolve_key(tokens[2])
                 keyboard.press(k)
                 keyboard.release(k)
 
-
             elif action == "key_hotkey" and len(tokens) >= 3:
-                keys = [self._resolve_key(k) for k in tokens[2].split("+") if k]
+                combo = tokens[2].strip().lower()
+                if combo in ("alt+f1", "f1+alt"):
+                    self._register_alt_f1()
+                keys = [self._resolve_key(k) for k in combo.split("+") if k]
                 for k in keys:
                     keyboard.press(k)
-
                 for k in reversed(keys):
                     keyboard.release(k)
 
@@ -256,9 +340,7 @@ class Slave(Client):
         elif subject == "common_info":
             master = tokens[-1]
             try:
-                info = {
-                    "path": str(Path.cwd())
-                }
+                info = {"path": str(Path.cwd())}
                 if master:
                     self.send(f"send common_info {master} {encode_base64(json.dumps(info))}")
             except Exception as e:
@@ -363,11 +445,10 @@ class Slave(Client):
                     self.send(f"send bash_execution {master} {result}")
             except Exception as e:
                 if master:
-                    self.send(f"send bash_execution {master} {encode_base64(f"Execution error: {e}")}")
+                    self.send(f"send bash_execution {master} {encode_base64(f'Execution error: {e}')}")
                 print(f"[slave] bash executing error: {e}")
 
         elif subject == "input":
-            # request input <action> ...
             self._handle_input(tokens[1:])
 
         return None
