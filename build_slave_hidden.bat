@@ -1,0 +1,1 @@
+pyinstaller --name SubNetSlaveHidden --icon icon.ico --noconfirm --noconsole slave.py
